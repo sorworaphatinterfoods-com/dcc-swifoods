@@ -1,0 +1,14 @@
+name = "dcs-document-control"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+# ผูก Worker เข้ากับฐานข้อมูล D1 ที่สร้างไว้แล้ว
+[[d1_databases]]
+binding = "DB"                                       # ใช้เป็น env.DB ในโค้ด
+database_name = "dcs_document_control"
+database_id = "8ce825c6-df55-4b13-bea3-c1ae46465b48"
+
+# (ทางเลือก) เปิดการป้องกันด้วย token:
+#   wrangler secret put AUTH_TOKEN
+# เมื่อมีค่า AUTH_TOKEN ทุก request ที่ /api/* ต้องส่ง header:
+#   Authorization: Bearer <token>
