@@ -1,6 +1,7 @@
 name = "dcs-document-control"
 main = "worker.js"
 compatibility_date = "2025-06-01"
+account_id = "acd0ef2518aed1f77c126d0592469ae1"
 
 # ผูก Worker เข้ากับฐานข้อมูล D1 ที่สร้างไว้แล้ว
 [[d1_databases]]
