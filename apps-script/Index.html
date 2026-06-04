@@ -205,7 +205,7 @@ function api(method,path,body){
 async function loadAll(){
   try{
     var res=await Promise.all([api('GET','/mdl'),api('GET','/approval'),api('GET','/ack')]);
-    ST.data={mdl:res[0],approval:res[1],ack:res[2]};ST.loaded=true;render();
+    ST.data={mdl:res[0]||[],approval:res[1]||[],ack:res[2]||[]};ST.loaded=true;render();
   }catch(e){ST.loaded=true;document.getElementById('tbody').innerHTML='<tr><td class="empty">เชื่อมต่อชีทไม่สำเร็จ: '+esc(e.message)+'</td></tr>';}
 }
 

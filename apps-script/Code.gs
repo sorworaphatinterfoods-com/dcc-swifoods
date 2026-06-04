@@ -82,9 +82,18 @@ function ensureIds_(b) {
   if (changed) rng.setValues(ids);
 }
 
+// Convert a sheet row into a plain, JSON-safe object. Date cells are turned
+// into ISO strings — google.script.run can silently return null when the
+// payload contains live Date objects, which breaks the client.
 function rowToObj_(b, row) {
   var o = {};
-  b.header.forEach(function (h, i) { if (h !== '') o[h] = (row[i] === '' ? null : row[i]); });
+  b.header.forEach(function (h, i) {
+    if (h === '') return;
+    var v = row[i];
+    if (v === '' || v == null) { o[h] = null; return; }
+    if (Object.prototype.toString.call(v) === '[object Date]') { o[h] = v.toISOString(); return; }
+    o[h] = v;
+  });
   return o;
 }
 
