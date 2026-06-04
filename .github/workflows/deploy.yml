@@ -1,0 +1,33 @@
+name: Deploy Worker
+
+# Deploy the Document Control System worker to Cloudflare.
+# Runs automatically on push to the default branch, and can be
+# triggered manually from the Actions tab (workflow_dispatch).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "worker.js"
+      - "wrangler.toml"
+      - "schema.sql"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
