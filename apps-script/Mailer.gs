@@ -5,8 +5,8 @@
    Cloudflare Worker. Aligned to QP-DC-01.
 
    Deploy:
-     1. script.google.com -> New project -> paste this file
-     2. Deploy > New deployment > Web app
+     1. script.google.com / New project / paste this file
+     2. Deploy / New deployment / Web app
           - Execute as: Me
           - Who has access: Anyone
      3. Authorize, copy the /exec URL, and send it back so it can
