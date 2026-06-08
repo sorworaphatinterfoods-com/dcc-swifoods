@@ -2,7 +2,7 @@
 
 Tiny web app that lets the Cloudflare Worker send email notifications from your
 Google Workspace account (e.g. `qa_admin@sorworaphatinterfoods.com`) without any
-external email service or DNS changes. Aligned to **QP-QA-001**.
+external email service or DNS changes. Aligned to **QP-DC-01**.
 
 ## Deploy
 1. Go to https://script.google.com → **New project**.

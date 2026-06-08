@@ -15,7 +15,7 @@ const REQ_COLS = ['Timestamp','RequestId','DocCode','ActionType','DocType','DocN
   'Reason','Decision','DecisionBy','DecisionTime','Comment'];
 
 // --- Email notification (via a Google Apps Script "mailer" web app) ---
-// Aligned to QP-QA-001: notify the document controller / approver on every
+// Aligned to QP-DC-01: notify the document controller / approver on every
 // new request. Configurable via Worker vars; falls back to these constants.
 const NOTIFY_DEFAULT = 'qa_admin@sorworaphatinterfoods.com';
 const MAILER_URL_DEFAULT = '';   // <- set to the Apps Script web-app URL once deployed
@@ -32,7 +32,7 @@ async function notifyNewRequest(env, r, origin) {
   const html =
     '<div style="font-family:Arial,Helvetica,sans-serif;max-width:620px">' +
     '<h2 style="color:#3b66f5;margin:0 0 4px">📄 มีคำร้องควบคุมเอกสารใหม่</h2>' +
-    '<p style="color:#6b7280;margin:0 0 14px;font-size:13px">ตามระเบียบปฏิบัติ <b>QP-QA-001 การควบคุมเอกสารและบันทึกคุณภาพ</b> · ใบขอดำเนินการด้านเอกสาร (DAR / FM-MR-01)<br>ขั้นตอนอนุมัติ: ผู้จัดทำ (Owner) → หัวหน้าแผนก / ตัวแทนฝ่ายบริหาร (MR) → กรรมการผู้จัดการ (MD)</p>' +
+    '<p style="color:#6b7280;margin:0 0 14px;font-size:13px">ตามระเบียบปฏิบัติ <b>QP-DC-01 การควบคุมเอกสาร</b> · ใบขอดำเนินการด้านเอกสาร (DAR / FM-MR-01)<br>ขั้นตอนอนุมัติ: ผู้จัดทำ (Owner) → หัวหน้าแผนก / ตัวแทนฝ่ายบริหาร (MR) → กรรมการผู้จัดการ (MD)</p>' +
     '<table style="border-collapse:collapse;width:100%;font-size:14px">' +
       tr('เลขคำร้อง', r.RequestId) + tr('ประเภทคำขอ', r.ActionType) + tr('ประเภทเอกสาร', r.DocType) +
       tr('รหัสเอกสาร', r.DocCode) + tr('ชื่อเอกสาร', r.DocName) + tr('แผนก', r.Department) +
@@ -485,7 +485,7 @@ function viewCreate(){
   el('topTitle').textContent='สร้างคำร้อง';
   var f=function(inner){return inner;};
   el('app').innerHTML=
-   '<div class="page-h"><h1>สร้างคำร้อง (DAR)</h1><p>ใบขอดำเนินการด้านเอกสาร · FM-MR-01 — จัดทำ / แก้ไข / ยกเลิก / ขอสำเนา (ตาม QP-QA-001)</p></div>'+
+   '<div class="page-h"><h1>สร้างคำร้อง (DAR)</h1><p>ใบขอดำเนินการด้านเอกสาร · FM-MR-01 —จัดทำ / แก้ไข / ยกเลิก / ขอสำเนา (ตาม QP-DC-01)</p></div>'+
    '<form id="reqForm">'+
      '<div class="card fsec"><div class="fsec-t"><span class="num">1</span>ข้อมูลผู้ร้องขอ</div>'+
        fld('RequesterName','ชื่อ-นามสกุล ผู้ส่งคำร้อง','text',{req:1,ph:'ชื่อ-นามสกุล'})+

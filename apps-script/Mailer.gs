@@ -2,7 +2,7 @@
    DCC Mailer — Google Apps Script web app
    Sends notification emails from your Google Workspace account
    (e.g. qa_admin@sorworaphatinterfoods.com) on behalf of the
-   Cloudflare Worker. Aligned to QP-QA-001.
+   Cloudflare Worker. Aligned to QP-DC-01.
 
    Deploy:
      1. script.google.com → New project → paste this file
