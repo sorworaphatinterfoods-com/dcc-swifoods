@@ -18,7 +18,7 @@ const REQ_COLS = ['Timestamp','RequestId','DocCode','ActionType','DocType','DocN
 // Aligned to QP-DC-01: notify the document controller / approver on every
 // new request. Configurable via Worker vars; falls back to these constants.
 const NOTIFY_DEFAULT = 'qa_admin@sorworaphatinterfoods.com';
-const MAILER_URL_DEFAULT = '';   // <- set to the Apps Script web-app URL once deployed
+const MAILER_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbyRCJ223DKomrx8wfUiWwcDK1R-wRfvYONVKWwmvKLLcd7Leiy6GVFXehpnQG9dttZoVQ/exec';   // Apps Script mailer web-app
 const MAILER_TOKEN_DEFAULT = 'a4f9c1e8d7b6403a9f2c5e1d8b7a6c3f';
 
 async function notifyNewRequest(env, r, origin) {
