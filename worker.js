@@ -12,7 +12,7 @@ const MDL_COLS = ['DocCode','DocType','DocName','Department','OwnerName','OwnerE
   'Keyword','FileLink','Notes'];
 const REQ_COLS = ['Timestamp','RequestId','DocCode','ActionType','DocType','DocName','Department',
   'RequestedRev','RequesterName','RequesterEmail','ApproverName','ApproverEmail','DraftFileLink',
-  'Reason','Decision','DecisionBy','DecisionTime','Comment'];
+  'ExpectedDate','Reason','Decision','DecisionBy','DecisionTime','Comment'];
 
 // --- Email notification (via a Google Apps Script "mailer" web app) ---
 // Aligned to QP-DC-01: notify the document controller / approver on every
@@ -31,15 +31,17 @@ async function notifyNewRequest(env, r, origin) {
   const subject = '[DCC] คำร้อง ' + (r.ActionType || '') + ' ' + (r.DocCode || '') + ' — รอพิจารณา';
   const html =
     '<div style="font-family:Arial,Helvetica,sans-serif;max-width:620px">' +
-    '<h2 style="color:#3b66f5;margin:0 0 4px">📄 มีคำร้องควบคุมเอกสารใหม่</h2>' +
+    '<h2 style="color:#15803d;margin:0 0 4px">📄 มีคำร้องควบคุมเอกสารใหม่</h2>' +
     '<p style="color:#6b7280;margin:0 0 14px;font-size:13px">ตามระเบียบปฏิบัติ <b>QP-DC-01 การควบคุมเอกสาร</b> · ใบขอดำเนินการด้านเอกสาร (DAR / FM-MR-01)<br>ขั้นตอนอนุมัติ: ผู้จัดทำ (Owner) → หัวหน้าแผนก / ตัวแทนฝ่ายบริหาร (MR) → กรรมการผู้จัดการ (MD)</p>' +
     '<table style="border-collapse:collapse;width:100%;font-size:14px">' +
       tr('เลขคำร้อง', r.RequestId) + tr('ประเภทคำขอ', r.ActionType) + tr('ประเภทเอกสาร', r.DocType) +
       tr('รหัสเอกสาร', r.DocCode) + tr('ชื่อเอกสาร', r.DocName) + tr('แผนก', r.Department) +
-      tr('ผู้ขอ', r.RequesterName) + tr('เหตุผล', r.Reason) + tr('สถานะ', r.Decision) + tr('เวลา', r.Timestamp) +
+      tr('ผู้ขอ', r.RequesterName) + tr('เหตุผล', r.Reason) +
+      (r.ExpectedDate ? tr('วันที่คาดว่าจะเสร็จ', r.ExpectedDate) : '') +
+      tr('สถานะ', r.Decision) + tr('เวลา', r.Timestamp) +
       (r.DraftFileLink ? tr('ไฟล์ร่าง', r.DraftFileLink) : '') +
     '</table>' +
-    (origin ? '<p style="margin:16px 0"><a href="' + origin + '" style="background:#3b66f5;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none">เปิดระบบ DCC เพื่อพิจารณา</a></p>' : '') +
+    (origin ? '<p style="margin:16px 0"><a href="' + origin + '" style="background:#15803d;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none">เปิดระบบ DCC เพื่อพิจารณา</a></p>' : '') +
     '<p style="color:#9ca3af;font-size:12px">อีเมลนี้ส่งอัตโนมัติจากระบบควบคุมเอกสาร (Document Control Center)</p>' +
     '</div>';
   try {
@@ -141,6 +143,32 @@ async function api(request, env, url, ctx) {
   return json({ error: 'method not allowed' }, 405);
 }
 
+// Store an uploaded file in R2 and return a URL to retrieve it.
+async function uploadHandler(request, env, url) {
+  if (!env.FILES) return json({ error: 'storage not configured (R2 binding FILES missing)' }, 500);
+  var raw = url.searchParams.get('name') || 'file';
+  var safe = raw.replace(/[^A-Za-z0-9._\-]+/g, '_').replace(/^_+/, '');
+  if (safe.length > 80) safe = safe.slice(-80);
+  if (!safe) safe = 'file';
+  var key = 'uploads/' + uuid() + '-' + safe;
+  var ct = request.headers.get('content-type') || 'application/octet-stream';
+  await env.FILES.put(key, request.body, { httpMetadata: { contentType: ct } });
+  return json({ url: '/files/' + key, name: raw });
+}
+
+// Serve a previously uploaded file from R2.
+async function serveFile(env, url) {
+  if (!env.FILES) return new Response('storage not configured', { status: 500 });
+  var key = decodeURIComponent(url.pathname.replace(/^\/files\//, ''));
+  var obj = await env.FILES.get(key);
+  if (!obj) return new Response('not found', { status: 404 });
+  var h = new Headers();
+  obj.writeHttpMetadata(h);
+  h.set('etag', obj.httpEtag);
+  h.set('cache-control', 'private, max-age=3600');
+  return new Response(obj.body, { headers: h });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -155,9 +183,13 @@ export default {
         const a = request.headers.get('authorization') || '';
         if (a !== 'Bearer ' + env.AUTH_TOKEN) return json({ error: 'unauthorized' }, 401);
       }
+      if (url.pathname === '/api/upload' && request.method === 'POST') {
+        return await uploadHandler(request, env, url);  // body not pre-parsed here
+      }
       try { return await api(request, env, url, ctx); }
       catch (e) { return json({ error: String((e && e.message) || e) }, 500); }
     }
+    if (url.pathname.startsWith('/files/')) return serveFile(env, url);
     if (url.pathname === '/' || url.pathname === '') {
       return new Response(HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     }
@@ -175,17 +207,21 @@ const HTML = `<!doctype html>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
-  --bg:#f1f3f7;--card:#ffffff;--ink:#1f2533;--muted:#8b91a3;--line:#eceef3;
-  --blue:#3b66f5;--blue-soft:#eef2ff;
+  --bg:#eef4f0;--card:#ffffff;--ink:#1f2a26;--muted:#7e8a83;--line:#e6efe9;
+  --blue:#159a57;--blue-soft:#e4f5ec;
+  --grad:linear-gradient(135deg,#1fae5f 0%,#0d9488 100%);
+  --grad-bar:linear-gradient(135deg,#15803d 0%,#0f766e 100%);
   --amber:#f59e0b;--amber-soft:#fff5e6;--amber-ink:#b4690e;
   --green:#16a34a;--green-soft:#e8f7ee;--green-ink:#15803d;
   --red:#ef4444;--red-soft:#fdecec;--red-ink:#c62f2f;
   --slate:#64748b;--slate-soft:#eef1f5;
 }
-html,body{background:var(--bg);color:var(--ink);font-family:'Noto Sans Thai',system-ui,sans-serif;font-size:15px;line-height:1.5}
+html,body{background:var(--bg);background-image:linear-gradient(180deg,#eef6f0 0%,#e3efe8 100%);background-attachment:fixed;color:var(--ink);font-family:'Noto Sans Thai',system-ui,sans-serif;font-size:15px;line-height:1.5}
 .mono{font-family:'IBM Plex Mono',monospace}
-#topbar{position:sticky;top:0;z-index:30;height:56px;background:#fff;border-bottom:1px solid var(--line);
+#topbar{position:sticky;top:0;z-index:30;height:56px;background:var(--grad-bar);color:#fff;box-shadow:0 2px 12px rgba(13,148,136,.28);
   display:flex;align-items:center;gap:10px;padding:0 14px}
+#topbar .iconbtn{color:#fff}
+#topbar .iconbtn:active{background:rgba(255,255,255,.18)}
 #topbar .tt{font-weight:700;font-size:16px;flex:1;text-align:center}
 .iconbtn{width:38px;height:38px;border:none;background:none;border-radius:10px;font-size:20px;cursor:pointer;color:var(--ink);display:grid;place-items:center}
 .iconbtn:active{background:var(--slate-soft)}
@@ -202,13 +238,13 @@ main{max-width:760px;margin:0 auto;padding:18px 14px 90px}
   transition:transform .22s ease;box-shadow:2px 0 24px rgba(20,30,60,.12);display:flex;flex-direction:column}
 #drawer.open{transform:none}
 .brand{display:flex;align-items:center;gap:10px;padding:18px 16px;border-bottom:1px solid var(--line)}
-.brand .logo{width:38px;height:38px;border-radius:10px;background:var(--blue);color:#fff;display:grid;place-items:center;font-size:18px}
+.brand .logo{width:38px;height:38px;border-radius:10px;background:var(--grad);color:#fff;display:grid;place-items:center;font-size:18px}
 .brand b{font-size:15px}.brand span{display:block;font-size:11px;color:var(--muted)}
 nav{padding:10px 10px;display:flex;flex-direction:column;gap:3px}
 nav a{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;color:var(--ink);cursor:pointer;font-weight:500;font-size:14.5px}
 nav a .ni{width:20px;text-align:center}
 nav a:active{background:var(--slate-soft)}
-nav a.on{background:var(--blue);color:#fff}
+nav a.on{background:var(--grad);color:#fff}
 /* stat cards */
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}
 .stat{background:#fff;border:1px solid var(--line);border-radius:16px;padding:15px;display:flex;flex-direction:column;gap:10px}
@@ -250,13 +286,13 @@ tr:last-child td{border-bottom:none}
 .fld input,.fld select,.fld textarea{width:100%;font-family:inherit;font-size:14.5px;color:var(--ink);background:#fff;
   border:1px solid #dde1ea;border-radius:11px;padding:11px 13px;outline:none;transition:border .12s,box-shadow .12s}
 .fld input::placeholder,.fld textarea::placeholder{color:#aeb4c2}
-.fld input:focus,.fld select:focus,.fld textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,102,245,.12)}
+.fld input:focus,.fld select:focus,.fld textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(21,154,87,.18)}
 .fld textarea{resize:vertical;min-height:80px}
 .fld select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238b91a3' d='M6 8 0 0h12z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;font-family:inherit;font-size:15px;font-weight:600;
   cursor:pointer;border-radius:12px;padding:13px;border:none;transition:filter .12s,transform .1s}
 .btn:active{transform:translateY(1px)}
-.btn-pri{background:var(--blue);color:#fff}
+.btn-pri{background:var(--grad);color:#fff}
 .btn-pri:active{filter:brightness(.94)}
 .btn-ghost{background:var(--slate-soft);color:var(--ink)}
 .btn-sm{width:auto;padding:8px 14px;font-size:13.5px;border-radius:10px}
@@ -480,6 +516,21 @@ function viewExpiry(){
   }).catch(showErr);
 }
 
+/* ---------- file upload (to R2 via the Worker) ---------- */
+function uploadFile(file){
+  var status=el('upStatus');
+  if(file.size>25*1024*1024){status.textContent='ไฟล์ใหญ่เกิน 25MB';return;}
+  status.textContent='กำลังอัปโหลด… '+file.name;
+  fetch('/api/upload?name='+encodeURIComponent(file.name),{method:'POST',headers:{'content-type':file.type||'application/octet-stream'},body:file})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(j&&j.url){var inp=document.querySelector('[data-f=DraftFileLink]');if(inp)inp.value=j.url;
+        status.innerHTML='✓ แนบแล้ว: <a href="'+esc(j.url)+'" target="_blank" style="color:var(--blue)">'+esc(file.name)+'</a>';}
+      else{status.textContent='อัปโหลดไม่สำเร็จ: '+((j&&j.error)||'unknown');}
+    })
+    .catch(function(err){status.textContent='อัปโหลดไม่สำเร็จ: '+err.message;});
+}
+
 /* ---------- create request (full page form) ---------- */
 function viewCreate(){
   el('topTitle').textContent='สร้างคำร้อง';
@@ -498,14 +549,23 @@ function viewCreate(){
        fldSelect('DocType','ประเภทเอกสาร',DOCTYPES,{req:1})+
        fld('DocName','ชื่อเอกสาร (ไทย/อังกฤษ)','text',{req:1,ph:'เช่น ขั้นตอนการตรวจรับวัตถุดิบ'})+
        fld('DocCode','รหัสเอกสาร','text',{ph:'เช่น SOP-PD-001',mono:1})+
-       fld('DraftFileLink','ลิงก์ไฟล์ฉบับร่าง (Draft File)','url',{ph:'วางลิงก์ Google Drive / .pdf / .docx'})+
+       '<div class="fld"><label>ไฟล์ฉบับร่าง (Draft File)</label>'+
+         '<input type="url" data-f="DraftFileLink" placeholder="วางลิงก์ หรือกดอัปโหลดไฟล์ด้านล่าง" value="">'+
+         '<div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap">'+
+           '<button type="button" class="btn btn-ghost btn-sm" id="upBtn">📎 อัปโหลดไฟล์</button>'+
+           '<input type="file" id="upFile" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" style="display:none">'+
+           '<span id="upStatus" style="font-size:12.5px;color:var(--muted)"></span>'+
+         '</div></div>'+
      '</div>'+
      '<div class="card fsec"><div class="fsec-t"><span class="num">4</span>เหตุผลและการอนุมัติ</div>'+
        fld('Reason','เหตุผลในการขอ','textarea',{req:1,ph:'ระบุเหตุผลที่ต้องสร้างหรือแก้ไขเอกสาร'})+
+       fld('ExpectedDate','วันที่คาดว่าจะแล้วเสร็จ (Target Date)','date',{})+
        fld('ApproverName','ผู้อนุมัติ (Approver)','text',{ph:'ชื่อผู้อนุมัติ'})+
      '</div>'+
      '<button type="submit" class="btn btn-pri" id="submitReq">&#9993; ส่งคำร้อง</button>'+
    '</form>';
+  el('upBtn').addEventListener('click',function(){el('upFile').click();});
+  el('upFile').addEventListener('change',function(e){var ff=e.target.files&&e.target.files[0];if(ff)uploadFile(ff);});
   el('reqForm').addEventListener('submit',function(e){
     e.preventDefault();
     var rec=collect(el('reqForm'));
@@ -592,7 +652,8 @@ function openRequest(id){
     '<div class="kv"><b>ประเภทคำขอ</b><span>'+esc(r.ActionType||'—')+'</span></div>'+
     '<div class="kv"><b>ผู้ขอ</b><span>'+esc(r.RequesterName||'—')+' ('+esc(r.Department||'-')+')</span></div>'+
     '<div class="kv"><b>เหตุผล</b><span>'+esc(r.Reason||'—')+'</span></div>'+
-    (r.DraftFileLink?'<div class="kv"><b>ไฟล์ร่าง</b><a href="'+esc(r.DraftFileLink)+'" target="_blank" style="color:var(--blue)">เปิดลิงก์</a></div>':'')+
+    '<div class="kv"><b>วันที่คาดว่าจะเสร็จ</b><span>'+(r.ExpectedDate?fmtDate(r.ExpectedDate):'—')+'</span></div>'+
+    (r.DraftFileLink?'<div class="kv"><b>ไฟล์ร่าง</b><a href="'+esc(r.DraftFileLink)+'" target="_blank" style="color:var(--blue)">เปิดไฟล์</a></div>':'')+
     '<div class="kv"><b>สถานะ</b><span>'+decBadge(r.Decision)+'</span></div>'+
     '<div style="margin-top:16px">'+fld('DecisionBy','ผู้ตัดสิน','text',{val:r.DecisionBy})+
       fld('Comment','ความเห็น','textarea',{val:r.Comment})+'</div>'+
