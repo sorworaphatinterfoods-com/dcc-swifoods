@@ -32,7 +32,7 @@ async function notifyNewRequest(env, r, origin) {
   const html =
     '<div style="font-family:Arial,Helvetica,sans-serif;max-width:620px">' +
     '<h2 style="color:#3b66f5;margin:0 0 4px">📄 มีคำร้องควบคุมเอกสารใหม่</h2>' +
-    '<p style="color:#6b7280;margin:0 0 14px;font-size:13px">ตามระเบียบปฏิบัติ <b>QP-QA-001 การควบคุมเอกสารและบันทึกคุณภาพ</b> — Digital Approval Workflow (ผู้จัดทำ → ผู้ทบทวน → ผู้อนุมัติ)</p>' +
+    '<p style="color:#6b7280;margin:0 0 14px;font-size:13px">ตามระเบียบปฏิบัติ <b>QP-QA-001 การควบคุมเอกสารและบันทึกคุณภาพ</b> · ใบขอดำเนินการด้านเอกสาร (DAR / FM-MR-01)<br>ขั้นตอนอนุมัติ: ผู้จัดทำ (Owner) → หัวหน้าแผนก / ตัวแทนฝ่ายบริหาร (MR) → กรรมการผู้จัดการ (MD)</p>' +
     '<table style="border-collapse:collapse;width:100%;font-size:14px">' +
       tr('เลขคำร้อง', r.RequestId) + tr('ประเภทคำขอ', r.ActionType) + tr('ประเภทเอกสาร', r.DocType) +
       tr('รหัสเอกสาร', r.DocCode) + tr('ชื่อเอกสาร', r.DocName) + tr('แผนก', r.Department) +
@@ -304,9 +304,9 @@ tr:last-child td{border-bottom:none}
 
 <script>
 var ST={view:'dashboard',mdl:[],requests:[],stats:null,q:''};
-var DEPTS=['QA','QC','PD','PE','HR','WH','PU','MK','OTHER'];
-var DOCTYPES=['POL','QP','WI','FM','SD','HACCP','OTHER'];
-var ACTIONS=['สร้างเอกสารใหม่','แก้ไข/ปรับปรุง','ยกเลิกเอกสาร'];
+var DEPTS=['QA','QC','PD','WH','HR','AC','PU','MN'];
+var DOCTYPES=['QM','QP','WI','FM','SD'];
+var ACTIONS=['จัดทำเอกสารใหม่','ปรับปรุง/แก้ไขเอกสาร','ยกเลิกเอกสาร','ขอสำเนา/ขอใช้เอกสาร'];
 var STATUSES=['Draft','Pending Approval','Active','Obsolete'];
 
 function el(id){return document.getElementById(id);}
@@ -427,7 +427,7 @@ function renderMdlList(){
     '</div>';
   }).join('')||'<div class="empty">ยังไม่มีเอกสารในทะเบียน — กด “+ เพิ่ม”</div>';
   el('app').innerHTML=
-   '<div class="page-h"><h1>ทะเบียนเอกสารหลัก</h1><p>Master Document List · '+ST.mdl.length+' ฉบับ</p></div>'+
+   '<div class="page-h"><h1>บัญชีแม่บทเอกสาร</h1><p>Document Master List · FM-MR-02 · '+ST.mdl.length+' ฉบับ</p></div>'+
    '<div class="toolbar"><div class="search">&#128269;<input id="q" placeholder="ค้นหา รหัส/ชื่อ/แผนก…" value="'+esc(ST.q)+'"></div>'+
      '<button class="btn btn-pri btn-sm" id="addMdl">+ เพิ่ม</button></div>'+
    cards;
@@ -485,7 +485,7 @@ function viewCreate(){
   el('topTitle').textContent='สร้างคำร้อง';
   var f=function(inner){return inner;};
   el('app').innerHTML=
-   '<div class="page-h"><h1>สร้างคำร้อง</h1><p>ขอสร้าง / แก้ไข / ยกเลิกเอกสาร</p></div>'+
+   '<div class="page-h"><h1>สร้างคำร้อง (DAR)</h1><p>ใบขอดำเนินการด้านเอกสาร · FM-MR-01 — จัดทำ / แก้ไข / ยกเลิก / ขอสำเนา (ตาม QP-QA-001)</p></div>'+
    '<form id="reqForm">'+
      '<div class="card fsec"><div class="fsec-t"><span class="num">1</span>ข้อมูลผู้ร้องขอ</div>'+
        fld('RequesterName','ชื่อ-นามสกุล ผู้ส่งคำร้อง','text',{req:1,ph:'ชื่อ-นามสกุล'})+
