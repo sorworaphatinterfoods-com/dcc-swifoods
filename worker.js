@@ -14,6 +14,40 @@ const REQ_COLS = ['Timestamp','RequestId','DocCode','ActionType','DocType','DocN
   'RequestedRev','RequesterName','RequesterEmail','ApproverName','ApproverEmail','DraftFileLink',
   'Reason','Decision','DecisionBy','DecisionTime','Comment'];
 
+// --- Email notification (via a Google Apps Script "mailer" web app) ---
+// Aligned to QP-QA-001: notify the document controller / approver on every
+// new request. Configurable via Worker vars; falls back to these constants.
+const NOTIFY_DEFAULT = 'qa_admin@sorworaphatinterfoods.com';
+const MAILER_URL_DEFAULT = '';   // <- set to the Apps Script web-app URL once deployed
+const MAILER_TOKEN_DEFAULT = 'a4f9c1e8d7b6403a9f2c5e1d8b7a6c3f';
+
+async function notifyNewRequest(env, r, origin) {
+  const url = env.MAILER_URL || MAILER_URL_DEFAULT;
+  if (!url) return;                          // mailer not configured yet — skip silently
+  const token = env.MAILER_TOKEN || MAILER_TOKEN_DEFAULT;
+  const to = env.NOTIFY_EMAIL || NOTIFY_DEFAULT;
+  const e = function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+  const tr = function (k, v) { return '<tr><td style="padding:6px 10px;color:#6b7280;border:1px solid #eee">' + k + '</td><td style="padding:6px 10px;border:1px solid #eee">' + e(v || '-') + '</td></tr>'; };
+  const subject = '[DCC] คำร้อง ' + (r.ActionType || '') + ' ' + (r.DocCode || '') + ' — รอพิจารณา';
+  const html =
+    '<div style="font-family:Arial,Helvetica,sans-serif;max-width:620px">' +
+    '<h2 style="color:#3b66f5;margin:0 0 4px">📄 มีคำร้องควบคุมเอกสารใหม่</h2>' +
+    '<p style="color:#6b7280;margin:0 0 14px;font-size:13px">ตามระเบียบปฏิบัติ <b>QP-QA-001 การควบคุมเอกสารและบันทึกคุณภาพ</b> — Digital Approval Workflow (ผู้จัดทำ → ผู้ทบทวน → ผู้อนุมัติ)</p>' +
+    '<table style="border-collapse:collapse;width:100%;font-size:14px">' +
+      tr('เลขคำร้อง', r.RequestId) + tr('ประเภทคำขอ', r.ActionType) + tr('ประเภทเอกสาร', r.DocType) +
+      tr('รหัสเอกสาร', r.DocCode) + tr('ชื่อเอกสาร', r.DocName) + tr('แผนก', r.Department) +
+      tr('ผู้ขอ', r.RequesterName) + tr('เหตุผล', r.Reason) + tr('สถานะ', r.Decision) + tr('เวลา', r.Timestamp) +
+      (r.DraftFileLink ? tr('ไฟล์ร่าง', r.DraftFileLink) : '') +
+    '</table>' +
+    (origin ? '<p style="margin:16px 0"><a href="' + origin + '" style="background:#3b66f5;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none">เปิดระบบ DCC เพื่อพิจารณา</a></p>' : '') +
+    '<p style="color:#9ca3af;font-size:12px">อีเมลนี้ส่งอัตโนมัติจากระบบควบคุมเอกสาร (Document Control Center)</p>' +
+    '</div>';
+  try {
+    await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: token, to: to, subject: subject, html: html }) });
+  } catch (err) { /* never block the request because email failed */ }
+}
+
 const J = { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' };
 function json(data, status) { return new Response(JSON.stringify(data), { status: status || 200, headers: J }); }
 function now() { return new Date().toISOString(); }
@@ -51,7 +85,7 @@ async function updateRow(db, table, id, obj) {
   await db.prepare('UPDATE ' + table + ' SET ' + sets + ' WHERE id=?').bind(...vals).run();
 }
 
-async function api(request, env, url) {
+async function api(request, env, url, ctx) {
   const db = env.DB;
   const seg = url.pathname.replace(/^\/api\/?/, '').split('/').filter(Boolean); // [resource, id?]
   const resource = seg[0];
@@ -88,6 +122,9 @@ async function api(request, env, url) {
     }
     const newId = await insertRow(db, table, obj);
     const row = await db.prepare('SELECT * FROM ' + table + ' WHERE id=?').bind(newId).first();
+    if (table === 'approval_log' && ctx && typeof ctx.waitUntil === 'function') {
+      ctx.waitUntil(notifyNewRequest(env, row, url.origin));
+    }
     return json(row, 201);
   }
   if (method === 'PUT') {
@@ -105,7 +142,7 @@ async function api(request, env, url) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api')) {
       if (request.method === 'OPTIONS') {
@@ -118,7 +155,7 @@ export default {
         const a = request.headers.get('authorization') || '';
         if (a !== 'Bearer ' + env.AUTH_TOKEN) return json({ error: 'unauthorized' }, 401);
       }
-      try { return await api(request, env, url); }
+      try { return await api(request, env, url, ctx); }
       catch (e) { return json({ error: String((e && e.message) || e) }, 500); }
     }
     if (url.pathname === '/' || url.pathname === '') {
