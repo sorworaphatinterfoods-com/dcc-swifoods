@@ -1,0 +1,605 @@
+/* ============================================================
+   Document Control System — Cloudflare Worker (D1-backed)
+   - Serves a mobile-first single-page app at "/"
+   - JSON API under "/api/*" backed by the D1 database (env.DB)
+   Tables: mdl, approval_log, ack_log  (see schema.sql)
+   Deploy: GitHub Action (wrangler) or `wrangler deploy`
+   ============================================================ */
+
+// Columns the client is allowed to write, per table.
+const MDL_COLS = ['DocCode','DocType','DocName','Department','OwnerName','OwnerEmail',
+  'ApproverName','ApproverEmail','Rev','Status','IssueDate','EffectiveDate','NextReviewDate',
+  'Keyword','FileLink','Notes'];
+const REQ_COLS = ['Timestamp','RequestId','DocCode','ActionType','DocType','DocName','Department',
+  'RequestedRev','RequesterName','RequesterEmail','ApproverName','ApproverEmail','DraftFileLink',
+  'Reason','Decision','DecisionBy','DecisionTime','Comment'];
+
+const J = { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' };
+function json(data, status) { return new Response(JSON.stringify(data), { status: status || 200, headers: J }); }
+function now() { return new Date().toISOString(); }
+function uuid() { return crypto.randomUUID(); }
+function reqId() {
+  const d = new Date();
+  const y = '' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+  return 'REQ-' + y + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+}
+
+// Keep only whitelisted, defined keys.
+function pick(body, cols) {
+  const o = {};
+  cols.forEach(function (k) { if (body[k] !== undefined && body[k] !== null) o[k] = body[k]; });
+  return o;
+}
+
+async function insertRow(db, table, obj) {
+  const id = obj.id || uuid();
+  delete obj.id;
+  const keys = Object.keys(obj);
+  const cols = ['id'].concat(keys, ['updated_at']);
+  const marks = cols.map(function () { return '?'; }).join(',');
+  const vals = [id].concat(keys.map(function (k) { return obj[k]; }), [now()]);
+  await db.prepare('INSERT INTO ' + table + ' (' + cols.join(',') + ') VALUES (' + marks + ')').bind(...vals).run();
+  return id;
+}
+
+async function updateRow(db, table, id, obj) {
+  delete obj.id;
+  const keys = Object.keys(obj);
+  if (!keys.length) return;
+  const sets = keys.map(function (k) { return k + '=?'; }).concat(['updated_at=?']).join(',');
+  const vals = keys.map(function (k) { return obj[k]; }).concat([now(), id]);
+  await db.prepare('UPDATE ' + table + ' SET ' + sets + ' WHERE id=?').bind(...vals).run();
+}
+
+async function api(request, env, url) {
+  const db = env.DB;
+  const seg = url.pathname.replace(/^\/api\/?/, '').split('/').filter(Boolean); // [resource, id?]
+  const resource = seg[0];
+  const id = seg[1];
+  const method = request.method;
+  let body = {};
+  if (method === 'POST' || method === 'PUT') { try { body = await request.json(); } catch (e) { body = {}; } }
+
+  if (resource === 'stats') {
+    const c = async function (sql) { const r = await db.prepare(sql).first(); return (r && r.c) || 0; };
+    const mdlTotal = await c('SELECT COUNT(*) c FROM mdl');
+    const pending = await c("SELECT COUNT(*) c FROM approval_log WHERE Decision='PENDING'");
+    const approved = await c("SELECT COUNT(*) c FROM approval_log WHERE Decision='APPROVED'");
+    const rejected = await c("SELECT COUNT(*) c FROM approval_log WHERE Decision='REJECTED'");
+    const recent = await db.prepare('SELECT * FROM approval_log ORDER BY Timestamp DESC LIMIT 6').all();
+    return json({ mdlTotal: mdlTotal, pending: pending, approved: approved, rejected: rejected, recent: recent.results || [] });
+  }
+
+  const table = resource === 'mdl' ? 'mdl' : resource === 'requests' ? 'approval_log' : null;
+  const cols = table === 'mdl' ? MDL_COLS : REQ_COLS;
+  if (!table) return json({ error: 'not found' }, 404);
+
+  if (method === 'GET') {
+    const order = table === 'mdl' ? 'DocCode ASC' : 'Timestamp DESC';
+    const rows = await db.prepare('SELECT * FROM ' + table + ' ORDER BY ' + order).all();
+    return json(rows.results || []);
+  }
+  if (method === 'POST') {
+    const obj = pick(body, cols);
+    if (table === 'approval_log') {
+      if (!obj.RequestId) obj.RequestId = reqId();
+      if (!obj.Timestamp) obj.Timestamp = now();
+      if (!obj.Decision) obj.Decision = 'PENDING';
+    }
+    const newId = await insertRow(db, table, obj);
+    const row = await db.prepare('SELECT * FROM ' + table + ' WHERE id=?').bind(newId).first();
+    return json(row, 201);
+  }
+  if (method === 'PUT') {
+    if (!id) return json({ error: 'id required' }, 400);
+    await updateRow(db, table, id, pick(body, cols));
+    const row = await db.prepare('SELECT * FROM ' + table + ' WHERE id=?').bind(id).first();
+    return json(row);
+  }
+  if (method === 'DELETE') {
+    if (!id) return json({ error: 'id required' }, 400);
+    await db.prepare('DELETE FROM ' + table + ' WHERE id=?').bind(id).run();
+    return json({ ok: true, id: id });
+  }
+  return json({ error: 'method not allowed' }, 405);
+}
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith('/api')) {
+      if (request.method === 'OPTIONS') {
+        return new Response(null, { headers: Object.assign({}, J, {
+          'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
+          'access-control-allow-headers': 'content-type,authorization',
+        }) });
+      }
+      if (env.AUTH_TOKEN) {
+        const a = request.headers.get('authorization') || '';
+        if (a !== 'Bearer ' + env.AUTH_TOKEN) return json({ error: 'unauthorized' }, 401);
+      }
+      try { return await api(request, env, url); }
+      catch (e) { return json({ error: String((e && e.message) || e) }, 500); }
+    }
+    if (url.pathname === '/' || url.pathname === '') {
+      return new Response(HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    }
+    return new Response('Not found', { status: 404 });
+  },
+};
+
+const HTML = `<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Document Control Center</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#f1f3f7;--card:#ffffff;--ink:#1f2533;--muted:#8b91a3;--line:#eceef3;
+  --blue:#3b66f5;--blue-soft:#eef2ff;
+  --amber:#f59e0b;--amber-soft:#fff5e6;--amber-ink:#b4690e;
+  --green:#16a34a;--green-soft:#e8f7ee;--green-ink:#15803d;
+  --red:#ef4444;--red-soft:#fdecec;--red-ink:#c62f2f;
+  --slate:#64748b;--slate-soft:#eef1f5;
+}
+html,body{background:var(--bg);color:var(--ink);font-family:'Noto Sans Thai',system-ui,sans-serif;font-size:15px;line-height:1.5}
+.mono{font-family:'IBM Plex Mono',monospace}
+#topbar{position:sticky;top:0;z-index:30;height:56px;background:#fff;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:10px;padding:0 14px}
+#topbar .tt{font-weight:700;font-size:16px;flex:1;text-align:center}
+.iconbtn{width:38px;height:38px;border:none;background:none;border-radius:10px;font-size:20px;cursor:pointer;color:var(--ink);display:grid;place-items:center}
+.iconbtn:active{background:var(--slate-soft)}
+main{max-width:760px;margin:0 auto;padding:18px 14px 90px}
+.page-h{margin:4px 2px 16px}
+.page-h h1{font-size:24px;font-weight:700}
+.page-h p{color:var(--muted);font-size:13px;margin-top:2px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 1px 2px rgba(20,30,60,.04)}
+.card+.card{margin-top:14px}
+/* drawer */
+#scrim{position:fixed;inset:0;background:rgba(15,20,35,.45);opacity:0;pointer-events:none;transition:opacity .2s;z-index:40}
+#scrim.open{opacity:1;pointer-events:auto}
+#drawer{position:fixed;top:0;left:0;bottom:0;width:264px;background:#fff;z-index:50;transform:translateX(-100%);
+  transition:transform .22s ease;box-shadow:2px 0 24px rgba(20,30,60,.12);display:flex;flex-direction:column}
+#drawer.open{transform:none}
+.brand{display:flex;align-items:center;gap:10px;padding:18px 16px;border-bottom:1px solid var(--line)}
+.brand .logo{width:38px;height:38px;border-radius:10px;background:var(--blue);color:#fff;display:grid;place-items:center;font-size:18px}
+.brand b{font-size:15px}.brand span{display:block;font-size:11px;color:var(--muted)}
+nav{padding:10px 10px;display:flex;flex-direction:column;gap:3px}
+nav a{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;color:var(--ink);cursor:pointer;font-weight:500;font-size:14.5px}
+nav a .ni{width:20px;text-align:center}
+nav a:active{background:var(--slate-soft)}
+nav a.on{background:var(--blue);color:#fff}
+/* stat cards */
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}
+.stat{background:#fff;border:1px solid var(--line);border-radius:16px;padding:15px;display:flex;flex-direction:column;gap:10px}
+.stat .tile{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-size:18px}
+.stat .n{font-size:30px;font-weight:700;line-height:1}
+.stat .t{font-size:12.5px;color:var(--muted)}
+.t-blue{background:var(--blue-soft);color:var(--blue)}
+.t-amber{background:var(--amber-soft);color:var(--amber)}
+.t-green{background:var(--green-soft);color:var(--green)}
+.t-red{background:var(--red-soft);color:var(--red)}
+/* tables / lists */
+.sec-h{display:flex;align-items:center;justify-content:space-between;margin:2px 2px 10px}
+.sec-h h2{font-size:16px;font-weight:700}
+.link{color:var(--blue);font-size:13px;font-weight:600;cursor:pointer}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;color:var(--muted);font-weight:600;font-size:12px;padding:8px 6px;border-bottom:1px solid var(--line)}
+td{padding:11px 6px;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:none}
+.badge{display:inline-block;font-size:12px;font-weight:600;padding:3px 11px;border-radius:20px}
+.bg-amber{background:var(--amber-soft);color:var(--amber-ink)}
+.bg-green{background:var(--green-soft);color:var(--green-ink)}
+.bg-red{background:var(--red-soft);color:var(--red-ink)}
+.bg-slate{background:var(--slate-soft);color:var(--slate)}
+.rowcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:7px;cursor:pointer}
+.rowcard+.rowcard{margin-top:10px}
+.rowcard .top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.rowcard .code{font-weight:700;font-size:14px}
+.rowcard .name{font-size:14px}
+.rowcard .meta{color:var(--muted);font-size:12.5px;display:flex;gap:12px;flex-wrap:wrap}
+.empty{text-align:center;color:var(--muted);padding:34px 10px}
+/* forms */
+.fsec{margin-bottom:14px}
+.fsec-t{font-weight:700;font-size:14.5px;margin:0 2px 10px;display:flex;gap:7px;align-items:center}
+.fsec-t .num{width:22px;height:22px;border-radius:7px;background:var(--blue-soft);color:var(--blue);font-size:12px;display:grid;place-items:center;font-weight:700}
+.fld{margin-bottom:13px}
+.fld:last-child{margin-bottom:0}
+.fld label{display:block;font-size:13px;font-weight:600;color:#46506a;margin-bottom:6px}
+.fld label .req{color:var(--red)}
+.fld input,.fld select,.fld textarea{width:100%;font-family:inherit;font-size:14.5px;color:var(--ink);background:#fff;
+  border:1px solid #dde1ea;border-radius:11px;padding:11px 13px;outline:none;transition:border .12s,box-shadow .12s}
+.fld input::placeholder,.fld textarea::placeholder{color:#aeb4c2}
+.fld input:focus,.fld select:focus,.fld textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,102,245,.12)}
+.fld textarea{resize:vertical;min-height:80px}
+.fld select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238b91a3' d='M6 8 0 0h12z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;font-family:inherit;font-size:15px;font-weight:600;
+  cursor:pointer;border-radius:12px;padding:13px;border:none;transition:filter .12s,transform .1s}
+.btn:active{transform:translateY(1px)}
+.btn-pri{background:var(--blue);color:#fff}
+.btn-pri:active{filter:brightness(.94)}
+.btn-ghost{background:var(--slate-soft);color:var(--ink)}
+.btn-sm{width:auto;padding:8px 14px;font-size:13.5px;border-radius:10px}
+.btn:disabled{opacity:.55}
+.toolbar{display:flex;gap:8px;margin-bottom:14px}
+.toolbar .search{flex:1;display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #dde1ea;border-radius:11px;padding:0 12px}
+.toolbar .search input{border:none;outline:none;width:100%;padding:11px 0;font-family:inherit;font-size:14px;background:none}
+/* modal */
+.overlay{position:fixed;inset:0;background:rgba(15,20,35,.5);z-index:60;display:flex;align-items:flex-end;justify-content:center;padding:0}
+.sheet{background:#fff;width:100%;max-width:760px;max-height:92vh;overflow-y:auto;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))}
+@media(min-width:640px){.overlay{align-items:center;padding:20px}.sheet{border-radius:18px}}
+.sheet-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.sheet-h h3{font-size:17px;font-weight:700}
+.expiry-pill{font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:20px}
+.kv{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px}
+.kv:last-child{border-bottom:none}.kv b{color:var(--muted);font-weight:600}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:#1f2533;color:#fff;
+  padding:11px 18px;border-radius:12px;font-size:14px;z-index:80;opacity:0;transition:all .25s;pointer-events:none}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<div id="topbar">
+  <button class="iconbtn" id="menuBtn">&#9776;</button>
+  <div class="tt" id="topTitle">Document Control</div>
+  <button class="iconbtn" id="refreshBtn">&#8635;</button>
+</div>
+<div id="scrim"></div>
+<aside id="drawer">
+  <div class="brand">
+    <div class="logo">&#128737;</div>
+    <div><b>Document Control</b><span>ระบบควบคุมเอกสาร</span></div>
+  </div>
+  <nav id="nav">
+    <a data-nav="dashboard"><span class="ni">&#128202;</span>Dashboard</a>
+    <a data-nav="create"><span class="ni">&#9999;</span>สร้างคำร้อง</a>
+    <a data-nav="requests"><span class="ni">&#128203;</span>คำร้องทั้งหมด</a>
+    <a data-nav="mdl"><span class="ni">&#128196;</span>MDL</a>
+    <a data-nav="expiry"><span class="ni">&#9200;</span>Expiry Monitor</a>
+  </nav>
+</aside>
+<main id="app"></main>
+<div id="modalRoot"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+var ST={view:'dashboard',mdl:[],requests:[],stats:null,q:''};
+var DEPTS=['QA','QC','PD','PE','HR','WH','PU','MK','OTHER'];
+var DOCTYPES=['POL','QP','WI','FM','SD','HACCP','OTHER'];
+var ACTIONS=['สร้างเอกสารใหม่','แก้ไข/ปรับปรุง','ยกเลิกเอกสาร'];
+var STATUSES=['Draft','Pending Approval','Active','Obsolete'];
+
+function el(id){return document.getElementById(id);}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function toast(m){var t=el('toast');t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},2200);}
+function fmtDate(v){if(!v)return '—';var d=new Date(v);if(isNaN(d))return v;return d.toLocaleDateString('th-TH',{year:'numeric',month:'short',day:'numeric'});}
+
+function api(method,path,body){
+  return fetch('/api'+path,{method:method,headers:{'content-type':'application/json'},body:body?JSON.stringify(body):undefined})
+    .then(function(r){
+      if(r.status===204)return null;
+      return r.json().then(function(j){ if(!r.ok) throw new Error(j&&j.error?j.error:('HTTP '+r.status)); return j; });
+    });
+}
+
+/* ---------- drawer / nav ---------- */
+function openDrawer(o){el('drawer').classList.toggle('open',o);el('scrim').classList.toggle('open',o);}
+function setNav(){var as=el('nav').querySelectorAll('a');for(var i=0;i<as.length;i++)as[i].classList.toggle('on',as[i].getAttribute('data-nav')===ST.view);}
+function navigate(v){ST.view=v;ST.q='';setNav();openDrawer(false);render();}
+
+/* ---------- decision badge ---------- */
+function decBadge(d){
+  if(d==='APPROVED')return '<span class="badge bg-green">Approved</span>';
+  if(d==='REJECTED')return '<span class="badge bg-red">Rejected</span>';
+  return '<span class="badge bg-amber">Pending</span>';
+}
+
+/* ---------- views ---------- */
+function render(){
+  if(ST.view==='dashboard')return viewDashboard();
+  if(ST.view==='create')return viewCreate();
+  if(ST.view==='requests')return viewRequests();
+  if(ST.view==='mdl')return viewMdl();
+  if(ST.view==='expiry')return viewExpiry();
+}
+
+function loading(){el('app').innerHTML='<div class="empty">กำลังโหลด…</div>';}
+
+function viewDashboard(){
+  el('topTitle').textContent='Dashboard';
+  loading();
+  api('GET','/stats').then(function(s){
+    ST.stats=s;
+    var rec=(s.recent||[]).map(function(r){
+      return '<tr><td class="mono">'+esc(r.DocCode||'—')+'</td><td style="text-align:right">'+decBadge(r.Decision)+'</td></tr>';
+    }).join('')||'<tr><td class="empty" colspan="2">ยังไม่มีคำร้อง</td></tr>';
+    el('app').innerHTML=
+     '<div class="page-h"><h1>Dashboard</h1><p>ภาพรวมระบบควบคุมเอกสาร — Document Control Center</p></div>'+
+     '<div class="stats">'+
+       statCard('t-blue','&#128196;',s.mdlTotal,'เอกสารทั้งหมด (MDL)')+
+       statCard('t-amber','&#9201;',s.pending,'รออนุมัติ')+
+       statCard('t-green','&#10004;',s.approved,'อนุมัติแล้ว')+
+       statCard('t-red','&#10006;',s.rejected,'ปฏิเสธ')+
+     '</div>'+
+     '<div class="card"><div class="sec-h"><h2>คำร้องล่าสุด</h2><span class="link" data-nav-link="requests">ดูทั้งหมด &#8594;</span></div>'+
+       '<table><thead><tr><th>รหัส</th><th style="text-align:right">สถานะ</th></tr></thead><tbody>'+rec+'</tbody></table></div>';
+    bindNavLinks();
+  }).catch(showErr);
+}
+function statCard(tile,icon,n,t){
+  return '<div class="stat"><div class="tile '+tile+'">'+icon+'</div><div class="n">'+(n||0)+'</div><div class="t">'+t+'</div></div>';
+}
+
+function viewRequests(){
+  el('topTitle').textContent='คำร้องทั้งหมด';
+  loading();
+  api('GET','/requests').then(function(list){
+    ST.requests=list;
+    renderRequestList();
+  }).catch(showErr);
+}
+function renderRequestList(){
+  var q=ST.q.trim().toLowerCase();
+  var list=ST.requests.filter(function(r){
+    if(!q)return true;
+    return [r.DocCode,r.DocName,r.RequesterName,r.Department,r.RequestId].some(function(x){return String(x||'').toLowerCase().indexOf(q)>=0;});
+  });
+  var cards=list.map(function(r){
+    return '<div class="rowcard" data-req="'+r.id+'">'+
+      '<div class="top"><span class="code mono">'+esc(r.DocCode||'—')+'</span>'+decBadge(r.Decision)+'</div>'+
+      '<div class="name">'+esc(r.DocName||'(ไม่ระบุชื่อเอกสาร)')+'</div>'+
+      '<div class="meta"><span>&#128100; '+esc(r.RequesterName||'—')+'</span><span>'+esc(r.Department||'—')+'</span><span>'+esc(r.ActionType||'')+'</span></div>'+
+    '</div>';
+  }).join('')||'<div class="empty">ยังไม่มีคำร้อง</div>';
+  el('app').innerHTML=
+   '<div class="page-h"><h1>คำร้องทั้งหมด</h1><p>'+ST.requests.length+' รายการ</p></div>'+
+   '<div class="toolbar"><div class="search">&#128269;<input id="q" placeholder="ค้นหา รหัส/ชื่อ/ผู้ขอ…" value="'+esc(ST.q)+'"></div>'+
+     '<button class="btn btn-pri btn-sm" data-nav-link="create">+ สร้าง</button></div>'+
+   cards;
+  bindNavLinks();
+  el('q').addEventListener('input',function(e){ST.q=e.target.value;renderRequestList();});
+  var rc=el('app').querySelectorAll('[data-req]');
+  for(var i=0;i<rc.length;i++)rc[i].addEventListener('click',function(){openRequest(this.getAttribute('data-req'));});
+}
+
+function viewMdl(){
+  el('topTitle').textContent='MDL';
+  loading();
+  api('GET','/mdl').then(function(list){ST.mdl=list;renderMdlList();}).catch(showErr);
+}
+function renderMdlList(){
+  var q=ST.q.trim().toLowerCase();
+  var list=ST.mdl.filter(function(r){
+    if(!q)return true;
+    return [r.DocCode,r.DocName,r.Department,r.Status].some(function(x){return String(x||'').toLowerCase().indexOf(q)>=0;});
+  });
+  var statusBadge=function(s){
+    if(s==='Active')return '<span class="badge bg-green">Active</span>';
+    if(s==='Obsolete')return '<span class="badge bg-slate">Obsolete</span>';
+    if(s==='Pending Approval')return '<span class="badge bg-amber">Pending</span>';
+    return '<span class="badge bg-slate">'+esc(s||'Draft')+'</span>';
+  };
+  var cards=list.map(function(r){
+    return '<div class="rowcard" data-mdl="'+r.id+'">'+
+      '<div class="top"><span class="code mono">'+esc(r.DocCode)+'</span>'+statusBadge(r.Status)+'</div>'+
+      '<div class="name">'+esc(r.DocName||'')+'</div>'+
+      '<div class="meta"><span>'+esc(r.DocType||'—')+'</span><span>'+esc(r.Department||'—')+'</span><span>Rev '+esc(r.Rev||'-')+'</span></div>'+
+    '</div>';
+  }).join('')||'<div class="empty">ยังไม่มีเอกสารในทะเบียน — กด “+ เพิ่ม”</div>';
+  el('app').innerHTML=
+   '<div class="page-h"><h1>ทะเบียนเอกสารหลัก</h1><p>Master Document List · '+ST.mdl.length+' ฉบับ</p></div>'+
+   '<div class="toolbar"><div class="search">&#128269;<input id="q" placeholder="ค้นหา รหัส/ชื่อ/แผนก…" value="'+esc(ST.q)+'"></div>'+
+     '<button class="btn btn-pri btn-sm" id="addMdl">+ เพิ่ม</button></div>'+
+   cards;
+  el('q').addEventListener('input',function(e){ST.q=e.target.value;renderMdlList();});
+  el('addMdl').addEventListener('click',function(){openMdlForm(null);});
+  var rc=el('app').querySelectorAll('[data-mdl]');
+  for(var i=0;i<rc.length;i++)rc[i].addEventListener('click',function(){
+    var id=this.getAttribute('data-mdl');openMdlForm(ST.mdl.filter(function(x){return x.id===id;})[0]);
+  });
+}
+
+function viewExpiry(){
+  el('topTitle').textContent='Expiry Monitor';
+  loading();
+  api('GET','/mdl').then(function(list){
+    ST.mdl=list;
+    var today=new Date();today.setHours(0,0,0,0);
+    var withDate=list.map(function(r){
+      var d=r.NextReviewDate?new Date(r.NextReviewDate):null;
+      var days=(d&&!isNaN(d))?Math.round((d-today)/86400000):null;
+      return {r:r,days:days};
+    });
+    withDate.sort(function(a,b){
+      if(a.days==null)return 1;if(b.days==null)return -1;return a.days-b.days;
+    });
+    var pill=function(days){
+      if(days==null)return '<span class="expiry-pill bg-slate">ไม่ได้กำหนด</span>';
+      if(days<0)return '<span class="expiry-pill bg-red">เลยกำหนด '+(-days)+' วัน</span>';
+      if(days<=30)return '<span class="expiry-pill bg-amber">อีก '+days+' วัน</span>';
+      return '<span class="expiry-pill bg-green">อีก '+days+' วัน</span>';
+    };
+    var over=withDate.filter(function(x){return x.days!=null&&x.days<0;}).length;
+    var soon=withDate.filter(function(x){return x.days!=null&&x.days>=0&&x.days<=30;}).length;
+    var cards=withDate.map(function(x){
+      return '<div class="rowcard" data-mdl="'+x.r.id+'">'+
+        '<div class="top"><span class="code mono">'+esc(x.r.DocCode)+'</span>'+pill(x.days)+'</div>'+
+        '<div class="name">'+esc(x.r.DocName||'')+'</div>'+
+        '<div class="meta"><span>ทบทวนถัดไป: '+fmtDate(x.r.NextReviewDate)+'</span><span>'+esc(x.r.Department||'')+'</span></div>'+
+      '</div>';
+    }).join('')||'<div class="empty">ยังไม่มีเอกสารให้ติดตาม</div>';
+    el('app').innerHTML=
+     '<div class="page-h"><h1>Expiry Monitor</h1><p>ติดตามรอบทบทวนเอกสาร</p></div>'+
+     '<div class="stats"><div class="stat"><div class="tile t-red">&#9888;</div><div class="n">'+over+'</div><div class="t">เลยกำหนดทบทวน</div></div>'+
+       '<div class="stat"><div class="tile t-amber">&#9201;</div><div class="n">'+soon+'</div><div class="t">ใกล้ครบ (&le;30 วัน)</div></div></div>'+
+     cards;
+    var rc=el('app').querySelectorAll('[data-mdl]');
+    for(var i=0;i<rc.length;i++)rc[i].addEventListener('click',function(){
+      var id=this.getAttribute('data-mdl');openMdlForm(ST.mdl.filter(function(x){return x.id===id;})[0]);
+    });
+  }).catch(showErr);
+}
+
+/* ---------- create request (full page form) ---------- */
+function viewCreate(){
+  el('topTitle').textContent='สร้างคำร้อง';
+  var f=function(inner){return inner;};
+  el('app').innerHTML=
+   '<div class="page-h"><h1>สร้างคำร้อง</h1><p>ขอสร้าง / แก้ไข / ยกเลิกเอกสาร</p></div>'+
+   '<form id="reqForm">'+
+     '<div class="card fsec"><div class="fsec-t"><span class="num">1</span>ข้อมูลผู้ร้องขอ</div>'+
+       fld('RequesterName','ชื่อ-นามสกุล ผู้ส่งคำร้อง','text',{req:1,ph:'ชื่อ-นามสกุล'})+
+       fldSelect('Department','แผนก (Department)',DEPTS,{req:1})+
+     '</div>'+
+     '<div class="card fsec"><div class="fsec-t"><span class="num">2</span>ประเภทคำขอ</div>'+
+       fldSelect('ActionType','ประเภทการดำเนินการ',ACTIONS,{req:1})+
+     '</div>'+
+     '<div class="card fsec"><div class="fsec-t"><span class="num">3</span>ข้อมูลเอกสาร</div>'+
+       fldSelect('DocType','ประเภทเอกสาร',DOCTYPES,{req:1})+
+       fld('DocName','ชื่อเอกสาร (ไทย/อังกฤษ)','text',{req:1,ph:'เช่น ขั้นตอนการตรวจรับวัตถุดิบ'})+
+       fld('DocCode','รหัสเอกสาร','text',{ph:'เช่น SOP-PD-001',mono:1})+
+       fld('DraftFileLink','ลิงก์ไฟล์ฉบับร่าง (Draft File)','url',{ph:'วางลิงก์ Google Drive / .pdf / .docx'})+
+     '</div>'+
+     '<div class="card fsec"><div class="fsec-t"><span class="num">4</span>เหตุผลและการอนุมัติ</div>'+
+       fld('Reason','เหตุผลในการขอ','textarea',{req:1,ph:'ระบุเหตุผลที่ต้องสร้างหรือแก้ไขเอกสาร'})+
+       fld('ApproverName','ผู้อนุมัติ (Approver)','text',{ph:'ชื่อผู้อนุมัติ'})+
+     '</div>'+
+     '<button type="submit" class="btn btn-pri" id="submitReq">&#9993; ส่งคำร้อง</button>'+
+   '</form>';
+  el('reqForm').addEventListener('submit',function(e){
+    e.preventDefault();
+    var rec=collect(el('reqForm'));
+    var miss=requiredMissing(el('reqForm'));
+    if(miss){toast('กรุณากรอก: '+miss);return;}
+    var btn=el('submitReq');btn.disabled=true;btn.textContent='กำลังส่ง…';
+    api('POST','/requests',rec).then(function(){toast('ส่งคำร้องเรียบร้อย ✓');navigate('requests');})
+      .catch(function(err){toast('ส่งไม่สำเร็จ: '+err.message);btn.disabled=false;btn.innerHTML='&#9993; ส่งคำร้อง';});
+  });
+}
+
+/* ---------- field builders ---------- */
+function fld(k,label,type,o){
+  o=o||{};
+  var req=o.req?' <span class="req">*</span>':'';
+  var ph=o.ph?' placeholder="'+esc(o.ph)+'"':'';
+  var val=o.val!=null?esc(o.val):'';
+  var cls=o.mono?' class="mono"':'';
+  var ctrl;
+  if(type==='textarea')ctrl='<textarea data-f="'+k+'"'+(o.req?' data-req="'+esc(label)+'"':'')+ph+'>'+val+'</textarea>';
+  else ctrl='<input type="'+type+'" data-f="'+k+'"'+cls+(o.req?' data-req="'+esc(label)+'"':'')+ph+' value="'+val+'">';
+  return '<div class="fld"><label>'+esc(label)+req+'</label>'+ctrl+'</div>';
+}
+function fldSelect(k,label,opts,o){
+  o=o||{};
+  var req=o.req?' <span class="req">*</span>':'';
+  var cur=o.val!=null?String(o.val):'';
+  var options='<option value="" disabled'+(cur?'':' selected')+' hidden>— เลือก —</option>'+
+    opts.map(function(x){return '<option'+(x===cur?' selected':'')+'>'+esc(x)+'</option>';}).join('');
+  return '<div class="fld"><label>'+esc(label)+req+'</label><select data-f="'+k+'"'+(o.req?' data-req="'+esc(label)+'"':'')+'>'+options+'</select></div>';
+}
+function collect(form){
+  var rec={};var els=form.querySelectorAll('[data-f]');
+  for(var i=0;i<els.length;i++){var v=els[i].value;if(v!=='')rec[els[i].getAttribute('data-f')]=v;}
+  return rec;
+}
+function requiredMissing(form){
+  var els=form.querySelectorAll('[data-req]');var miss=[];
+  for(var i=0;i<els.length;i++){if(!String(els[i].value||'').trim())miss.push(els[i].getAttribute('data-req'));}
+  return miss.length?miss.join(', '):null;
+}
+
+/* ---------- MDL add/edit modal ---------- */
+function openMdlForm(rec){
+  rec=rec||{};
+  var isNew=!rec.id;
+  var body='<form id="mdlForm">'+
+    fld('DocCode','รหัสเอกสาร','text',{req:1,mono:1,val:rec.DocCode,ph:'เช่น SOP-PD-001'})+
+    fldSelect('DocType','ประเภทเอกสาร',DOCTYPES,{req:1,val:rec.DocType})+
+    fld('DocName','ชื่อเอกสาร','text',{req:1,val:rec.DocName})+
+    fldSelect('Department','แผนก',DEPTS,{val:rec.Department})+
+    fld('OwnerName','ผู้รับผิดชอบ','text',{val:rec.OwnerName})+
+    fld('Rev','Revision','text',{mono:1,val:rec.Rev})+
+    fldSelect('Status','สถานะ',STATUSES,{val:rec.Status})+
+    fld('EffectiveDate','วันบังคับใช้','date',{val:rec.EffectiveDate})+
+    fld('NextReviewDate','ทบทวนครั้งถัดไป','date',{val:rec.NextReviewDate})+
+    fld('FileLink','ลิงก์ไฟล์','url',{val:rec.FileLink})+
+    fld('Notes','หมายเหตุ','textarea',{val:rec.Notes})+
+    '<button type="submit" class="btn btn-pri" id="saveMdl" style="margin-top:6px">&#10003; บันทึก</button>'+
+    (isNew?'':'<button type="button" class="btn btn-ghost" id="delMdl" style="margin-top:10px;color:var(--red-ink)">ลบเอกสารนี้</button>')+
+   '</form>';
+  openSheet(isNew?'เพิ่มเอกสารใหม่':'แก้ไขเอกสาร',body);
+  el('mdlForm').addEventListener('submit',function(e){
+    e.preventDefault();
+    var miss=requiredMissing(el('mdlForm'));if(miss){toast('กรุณากรอก: '+miss);return;}
+    var data=collect(el('mdlForm'));
+    var btn=el('saveMdl');btn.disabled=true;btn.textContent='กำลังบันทึก…';
+    var p=isNew?api('POST','/mdl',data):api('PUT','/mdl/'+rec.id,data);
+    p.then(function(){closeSheet();toast('บันทึกแล้ว ✓');navigate('mdl');})
+     .catch(function(err){toast('บันทึกไม่สำเร็จ: '+err.message);btn.disabled=false;btn.innerHTML='&#10003; บันทึก';});
+  });
+  if(!isNew)el('delMdl').addEventListener('click',function(){
+    if(!confirm('ลบเอกสาร '+(rec.DocCode||'')+' ?'))return;
+    api('DELETE','/mdl/'+rec.id).then(function(){closeSheet();toast('ลบแล้ว');navigate('mdl');}).catch(function(e){toast('ลบไม่สำเร็จ');});
+  });
+}
+
+/* ---------- request detail / decision ---------- */
+function openRequest(id){
+  var r=ST.requests.filter(function(x){return x.id===id;})[0];if(!r)return;
+  var body='<div class="kv"><b>เลขคำขอ</b><span class="mono">'+esc(r.RequestId||'—')+'</span></div>'+
+    '<div class="kv"><b>รหัสเอกสาร</b><span class="mono">'+esc(r.DocCode||'—')+'</span></div>'+
+    '<div class="kv"><b>ชื่อเอกสาร</b><span>'+esc(r.DocName||'—')+'</span></div>'+
+    '<div class="kv"><b>ประเภทคำขอ</b><span>'+esc(r.ActionType||'—')+'</span></div>'+
+    '<div class="kv"><b>ผู้ขอ</b><span>'+esc(r.RequesterName||'—')+' ('+esc(r.Department||'-')+')</span></div>'+
+    '<div class="kv"><b>เหตุผล</b><span>'+esc(r.Reason||'—')+'</span></div>'+
+    (r.DraftFileLink?'<div class="kv"><b>ไฟล์ร่าง</b><a href="'+esc(r.DraftFileLink)+'" target="_blank" style="color:var(--blue)">เปิดลิงก์</a></div>':'')+
+    '<div class="kv"><b>สถานะ</b><span>'+decBadge(r.Decision)+'</span></div>'+
+    '<div style="margin-top:16px">'+fld('DecisionBy','ผู้ตัดสิน','text',{val:r.DecisionBy})+
+      fld('Comment','ความเห็น','textarea',{val:r.Comment})+'</div>'+
+    '<div style="display:flex;gap:8px;margin-top:6px">'+
+      '<button class="btn btn-pri" id="appr" style="background:var(--green)">&#10003; อนุมัติ</button>'+
+      '<button class="btn btn-pri" id="rej" style="background:var(--red)">&#10006; ปฏิเสธ</button></div>'+
+    '<button class="btn btn-ghost" id="delReq" style="margin-top:10px;color:var(--red-ink)">ลบคำร้อง</button>';
+  openSheet('รายละเอียดคำร้อง',body);
+  var decide=function(dec){
+    var data={Decision:dec,DecisionBy:el('modalRoot').querySelector('[data-f=DecisionBy]').value,
+      Comment:el('modalRoot').querySelector('[data-f=Comment]').value,DecisionTime:new Date().toISOString()};
+    api('PUT','/requests/'+r.id,data).then(function(){closeSheet();toast(dec==='APPROVED'?'อนุมัติแล้ว ✓':'ปฏิเสธแล้ว');navigate('requests');})
+      .catch(function(e){toast('บันทึกไม่สำเร็จ: '+e.message);});
+  };
+  el('appr').addEventListener('click',function(){decide('APPROVED');});
+  el('rej').addEventListener('click',function(){decide('REJECTED');});
+  el('delReq').addEventListener('click',function(){
+    if(!confirm('ลบคำร้องนี้?'))return;
+    api('DELETE','/requests/'+r.id).then(function(){closeSheet();toast('ลบแล้ว');navigate('requests');}).catch(function(e){toast('ลบไม่สำเร็จ');});
+  });
+}
+
+/* ---------- sheet/modal ---------- */
+function openSheet(title,bodyHtml){
+  el('modalRoot').innerHTML='<div class="overlay" id="ov"><div class="sheet"><div class="sheet-h"><h3>'+esc(title)+
+    '</h3><button class="iconbtn" id="closeSheet">&#10005;</button></div>'+bodyHtml+'</div></div>';
+  el('closeSheet').addEventListener('click',closeSheet);
+  el('ov').addEventListener('mousedown',function(e){if(e.target.id==='ov')closeSheet();});
+}
+function closeSheet(){el('modalRoot').innerHTML='';}
+
+function showErr(err){el('app').innerHTML='<div class="empty">โหลดข้อมูลไม่สำเร็จ<br><small>'+esc(err.message)+'</small></div>';}
+function bindNavLinks(){
+  var ls=el('app').querySelectorAll('[data-nav-link]');
+  for(var i=0;i<ls.length;i++)ls[i].addEventListener('click',function(){navigate(this.getAttribute('data-nav-link'));});
+}
+
+/* ---------- wire up ---------- */
+el('menuBtn').addEventListener('click',function(){openDrawer(!el('drawer').classList.contains('open'));});
+el('scrim').addEventListener('click',function(){openDrawer(false);});
+el('refreshBtn').addEventListener('click',function(){render();});
+var navas=el('nav').querySelectorAll('a');
+for(var i=0;i<navas.length;i++)navas[i].addEventListener('click',function(){navigate(this.getAttribute('data-nav'));});
+setNav();render();
+</script>
+</body>
+</html>`;
