@@ -17,7 +17,7 @@
 var SHARED_TOKEN = 'a4f9c1e8d7b6403a9f2c5e1d8b7a6c3f';
 
 // Fallback recipient if the Worker does not pass one.
-var DEFAULT_TO = 'qa_admin@sorworaphatinterfoods.com';
+var DEFAULT_TO = 'qa.sorworaphat@gmail.com';
 
 function doPost(e) {
   try {
