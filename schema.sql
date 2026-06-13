@@ -60,6 +60,25 @@ CREATE TABLE IF NOT EXISTS ack_log (
   updated_at    TEXT
 );
 
+-- บันทึกการแจกจ่าย/เรียกคืนเอกสาร (FM-MR-03)
+CREATE TABLE IF NOT EXISTS dist_log (
+  id           TEXT PRIMARY KEY,
+  Timestamp    TEXT,
+  DocCode      TEXT,
+  DocName      TEXT,
+  Rev          TEXT,
+  HolderName   TEXT,
+  Department   TEXT,
+  CopyNo       TEXT,
+  CopyType     TEXT,
+  IssuedDate   TEXT,
+  ReturnedDate TEXT,
+  Status       TEXT,
+  Notes        TEXT,
+  updated_at   TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_mdl_doccode  ON mdl(DocCode);
+CREATE INDEX IF NOT EXISTS idx_dist_doccode ON dist_log(DocCode);
 CREATE INDEX IF NOT EXISTS idx_appr_doccode ON approval_log(DocCode);
 CREATE INDEX IF NOT EXISTS idx_ack_doccode  ON ack_log(DocCode);

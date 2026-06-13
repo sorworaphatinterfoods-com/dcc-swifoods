@@ -13,6 +13,8 @@ const MDL_COLS = ['DocCode','DocType','DocName','Department','OwnerName','OwnerE
 const REQ_COLS = ['Timestamp','RequestId','DocCode','ActionType','DocType','DocName','Department',
   'RequestedRev','RequesterName','RequesterEmail','ApproverName','ApproverEmail','DraftFileLink',
   'ExpectedDate','Reason','Decision','DecisionBy','DecisionTime','Comment'];
+const DIST_COLS = ['Timestamp','DocCode','DocName','Rev','HolderName','Department','CopyNo',
+  'CopyType','IssuedDate','ReturnedDate','Status','Notes'];
 
 // --- Email notification (via a Google Apps Script "mailer" web app) ---
 // Aligned to QP-DC-01: notify the document controller / approver on every
@@ -177,8 +179,8 @@ async function api(request, env, url, ctx) {
     return json({ code: code });
   }
 
-  const table = resource === 'mdl' ? 'mdl' : resource === 'requests' ? 'approval_log' : null;
-  const cols = table === 'mdl' ? MDL_COLS : REQ_COLS;
+  const table = resource === 'mdl' ? 'mdl' : resource === 'requests' ? 'approval_log' : resource === 'dist' ? 'dist_log' : null;
+  const cols = table === 'mdl' ? MDL_COLS : table === 'dist_log' ? DIST_COLS : REQ_COLS;
   if (!table) return json({ error: 'not found' }, 404);
 
   if (method === 'GET') {
@@ -192,6 +194,10 @@ async function api(request, env, url, ctx) {
       if (!obj.RequestId) obj.RequestId = reqId();
       if (!obj.Timestamp) obj.Timestamp = now();
       if (!obj.Decision) obj.Decision = 'PENDING';
+    }
+    if (table === 'dist_log') {
+      if (!obj.Timestamp) obj.Timestamp = now();
+      if (!obj.Status) obj.Status = 'Issued';
     }
     const newId = await insertRow(db, table, obj);
     const row = await db.prepare('SELECT * FROM ' + table + ' WHERE id=?').bind(newId).first();
@@ -246,6 +252,60 @@ async function serveFile(env, url) {
   return new Response(obj.body, { headers: h });
 }
 
+// Printable DAR form (FM-MR-01) for a single request.
+function darHtml(r) {
+  var e = function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+  var d = function (v) { if (!v) return '......./......./.......'; var t = String(v); return t.length >= 10 ? t.slice(0, 10) : t; };
+  var status = r.Decision === 'APPROVED' ? 'อนุมัติ (APPROVED)' : r.Decision === 'REJECTED' ? 'ไม่อนุมัติ (REJECTED)' : 'รอพิจารณา (PENDING)';
+  var chk = function (label, on) { return '<span style="border:1.3px solid #333;display:inline-block;width:13px;height:13px;text-align:center;line-height:12px;margin-right:5px">' + (on ? '✓' : '') + '</span>' + label; };
+  var act = r.ActionType || '';
+  return '<!doctype html><html lang="th"><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1"><title>DAR ' + e(r.RequestId || '') + '</title>' +
+    "<style>@import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap');" +
+    '@page{size:A4;margin:16mm}*{box-sizing:border-box}' +
+    "body{font-family:'Sarabun',sans-serif;color:#1a1a1a;font-size:14px;line-height:1.5;margin:0;padding:24px;background:#f4f4f4}" +
+    '.sheet{background:#fff;max-width:780px;margin:0 auto;padding:30px 34px;box-shadow:0 1px 8px rgba(0,0,0,.12)}' +
+    '.hd{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2.5px solid #111;padding-bottom:10px}' +
+    '.hd .co{font-size:17px;font-weight:700}.hd .co small{display:block;font-size:11px;font-weight:400;color:#555;letter-spacing:.5px}' +
+    '.hd .ttl{text-align:right}.hd .ttl b{font-size:16px}.hd .ttl small{display:block;font-size:11px;color:#555}' +
+    '.meta{width:100%;border-collapse:collapse;margin:12px 0 4px;font-size:12.5px}' +
+    '.meta td{border:1px solid #bbb;padding:5px 8px}.meta .k{background:#eef3f0;font-weight:600;width:130px}' +
+    'h3{font-size:13.5px;margin:18px 0 6px;padding:5px 9px;background:#15803d;color:#fff;border-radius:4px}' +
+    'table.f{width:100%;border-collapse:collapse;font-size:13px}table.f td{border:1px solid #bbb;padding:7px 9px;vertical-align:top}' +
+    'table.f .k{background:#f3f6f4;font-weight:600;width:150px}' +
+    '.sign{display:flex;gap:14px;margin-top:30px}.sign .b{flex:1;text-align:center;font-size:12.5px}' +
+    '.sign .ln{margin:34px 14px 6px;border-top:1px dotted #555}' +
+    '.print{position:fixed;top:14px;right:14px;background:#15803d;color:#fff;border:none;padding:10px 18px;border-radius:8px;font:inherit;font-weight:600;cursor:pointer}' +
+    '@media print{body{background:#fff;padding:0}.sheet{box-shadow:none;max-width:none}.print{display:none}}' +
+    '</style></head><body>' +
+    '<button class="print" onclick="window.print()">🖨️ พิมพ์</button>' +
+    '<div class="sheet">' +
+    '<div class="hd"><div class="co">บริษัท ศ.วรภัทร อินเตอร์ ฟู้ดส์ จำกัด<small>S.WORAPHAT INTER FOODS CO., LTD.</small></div>' +
+      '<div class="ttl"><b>ใบขอดำเนินการด้านเอกสาร</b><small>Document Action Request (DAR) · FM-MR-01</small></div></div>' +
+    '<table class="meta"><tr><td class="k">เลขที่คำร้อง</td><td>' + e(r.RequestId || '-') + '</td><td class="k">วันที่ยื่น</td><td>' + d(r.Timestamp) + '</td></tr>' +
+      '<tr><td class="k">อ้างอิงระเบียบ</td><td>QP-DC-01</td><td class="k">สถานะ</td><td>' + status + '</td></tr></table>' +
+    '<h3>1. ประเภทการดำเนินการ</h3>' +
+    '<div style="padding:6px 4px">' + chk('จัดทำใหม่', /จัดทำ/.test(act)) + ' &nbsp; ' + chk('ปรับปรุง/แก้ไข', /ปรับปรุง|แก้ไข/.test(act)) + ' &nbsp; ' + chk('ยกเลิก', /ยกเลิก/.test(act)) + ' &nbsp; ' + chk('ขอสำเนา/ขอใช้', /สำเนา|ขอใช้/.test(act)) + '</div>' +
+    '<h3>2. รายละเอียดเอกสาร</h3>' +
+    '<table class="f">' +
+      '<tr><td class="k">รหัสเอกสาร</td><td>' + e(r.DocCode || '-') + '</td><td class="k">ประเภท</td><td>' + e(r.DocType || '-') + '</td></tr>' +
+      '<tr><td class="k">ชื่อเอกสาร</td><td colspan="3">' + e(r.DocName || '-') + '</td></tr>' +
+      '<tr><td class="k">แผนก</td><td>' + e(r.Department || '-') + '</td><td class="k">วันคาดว่าจะเสร็จ</td><td>' + d(r.ExpectedDate) + '</td></tr>' +
+      '<tr><td class="k">เหตุผล</td><td colspan="3">' + e(r.Reason || '-') + '</td></tr>' +
+      (r.DraftFileLink ? '<tr><td class="k">ไฟล์ฉบับร่าง</td><td colspan="3">' + e(r.DraftFileLink) + '</td></tr>' : '') +
+    '</table>' +
+    '<h3>3. ผลการพิจารณา</h3>' +
+    '<table class="f"><tr><td class="k">ผลการพิจารณา</td><td>' + status + '</td><td class="k">ผู้ตัดสิน</td><td>' + e(r.DecisionBy || '-') + '</td></tr>' +
+      '<tr><td class="k">ความเห็น</td><td colspan="3">' + e(r.Comment || '-') + '</td></tr></table>' +
+    '<div class="sign">' +
+      '<div class="b"><div class="ln"></div>(' + e(r.RequesterName || '..................') + ')<br>ผู้จัดทำ / ผู้ขอ<br>วันที่ ' + d(r.Timestamp) + '</div>' +
+      '<div class="b"><div class="ln"></div>(..................)<br>ผู้ทบทวน (หัวหน้าแผนก/MR)<br>วันที่ ......./......./.......</div>' +
+      '<div class="b"><div class="ln"></div>(' + e(r.ApproverName || '..................') + ')<br>ผู้อนุมัติ (MD)<br>วันที่ ' + d(r.DecisionTime) + '</div>' +
+    '</div></div>' +
+    '<script>window.addEventListener("load",function(){setTimeout(function(){window.print();},450);});<\/script>' +
+    '</body></html>';
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -267,6 +327,12 @@ export default {
       catch (e) { return json({ error: String((e && e.message) || e) }, 500); }
     }
     if (url.pathname.startsWith('/files/')) return serveFile(env, url);
+    if (url.pathname.startsWith('/dar/')) {
+      const rid = decodeURIComponent(url.pathname.replace(/^\/dar\//, ''));
+      const r = await env.DB.prepare('SELECT * FROM approval_log WHERE id=? OR RequestId=?').bind(rid, rid).first();
+      if (!r) return new Response('not found', { status: 404 });
+      return new Response(darHtml(r), { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    }
     if (url.pathname === '/' || url.pathname === '') {
       return new Response(HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     }
@@ -408,6 +474,7 @@ tr:last-child td{border-bottom:none}
     <a data-nav="create"><span class="ni">&#9999;</span>สร้างคำร้อง</a>
     <a data-nav="requests"><span class="ni">&#128203;</span>คำร้องทั้งหมด</a>
     <a data-nav="mdl"><span class="ni">&#128196;</span>MDL</a>
+    <a data-nav="dist"><span class="ni">&#128230;</span>แจกจ่ายเอกสาร</a>
     <a data-nav="expiry"><span class="ni">&#9200;</span>Expiry Monitor</a>
   </nav>
 </aside>
@@ -416,7 +483,9 @@ tr:last-child td{border-bottom:none}
 <div class="toast" id="toast"></div>
 
 <script>
-var ST={view:'dashboard',mdl:[],requests:[],stats:null,q:''};
+var ST={view:'dashboard',mdl:[],requests:[],dist:[],stats:null,q:''};
+var COPYTYPES=['Controlled (สำเนาควบคุม)','Uncontrolled (ไม่ควบคุม)'];
+var DIST_STATUS=['Issued (แจกจ่ายแล้ว)','Returned (เรียกคืนแล้ว)'];
 var DEPTS=['QA','QC','PD','WH','HR','AC','PU','MN'];
 var DOCTYPES=['QM','QP','WI','FM','SD'];
 var ACTIONS=['จัดทำเอกสารใหม่','ปรับปรุง/แก้ไขเอกสาร','ยกเลิกเอกสาร','ขอสำเนา/ขอใช้เอกสาร'];
@@ -453,6 +522,7 @@ function render(){
   if(ST.view==='create')return viewCreate();
   if(ST.view==='requests')return viewRequests();
   if(ST.view==='mdl')return viewMdl();
+  if(ST.view==='dist')return viewDist();
   if(ST.view==='expiry')return viewExpiry();
 }
 
@@ -549,6 +619,74 @@ function renderMdlList(){
   var rc=el('app').querySelectorAll('[data-mdl]');
   for(var i=0;i<rc.length;i++)rc[i].addEventListener('click',function(){
     var id=this.getAttribute('data-mdl');openMdlForm(ST.mdl.filter(function(x){return x.id===id;})[0]);
+  });
+}
+
+/* ---------- distribution (FM-MR-03) ---------- */
+function viewDist(){
+  el('topTitle').textContent='แจกจ่ายเอกสาร';
+  loading();
+  Promise.all([api('GET','/dist'),ST.mdl.length?Promise.resolve(ST.mdl):api('GET','/mdl')]).then(function(res){
+    ST.dist=res[0];ST.mdl=res[1];renderDistList();
+  }).catch(showErr);
+}
+function renderDistList(){
+  var q=ST.q.trim().toLowerCase();
+  var list=ST.dist.filter(function(r){if(!q)return true;
+    return [r.DocCode,r.DocName,r.HolderName,r.Department,r.CopyNo].some(function(x){return String(x||'').toLowerCase().indexOf(q)>=0;});});
+  var badge=function(s){return (s&&s.indexOf('Returned')>=0)?'<span class="badge bg-slate">เรียกคืนแล้ว</span>':'<span class="badge bg-green">แจกจ่ายแล้ว</span>';};
+  var cards=list.map(function(r){
+    return '<div class="rowcard" data-dist="'+r.id+'">'+
+      '<div class="top"><span class="code mono">'+esc(r.DocCode||'-')+' · Rev '+esc(r.Rev||'-')+'</span>'+badge(r.Status)+'</div>'+
+      '<div class="name">'+esc(r.DocName||'')+'</div>'+
+      '<div class="meta"><span>👤 '+esc(r.HolderName||'-')+'</span><span>'+esc(r.Department||'')+'</span><span>ชุดที่ '+esc(r.CopyNo||'-')+'</span><span>'+esc((r.CopyType||'').split(' ')[0])+'</span></div>'+
+    '</div>';
+  }).join('')||'<div class="empty">ยังไม่มีบันทึกการแจกจ่าย — กด “+ แจกจ่าย”</div>';
+  el('app').innerHTML=
+   '<div class="page-h"><h1>แจกจ่าย/เรียกคืนเอกสาร</h1><p>บันทึกการแจกจ่าย · FM-MR-03 · '+ST.dist.length+' รายการ</p></div>'+
+   '<div class="toolbar"><div class="search">&#128269;<input id="q" placeholder="ค้นหา รหัส/ผู้ถือครอง…" value="'+esc(ST.q)+'"></div>'+
+     '<button class="btn btn-pri btn-sm" id="addDist">+ แจกจ่าย</button></div>'+
+   cards;
+  el('q').addEventListener('input',function(e){ST.q=e.target.value;renderDistList();});
+  el('addDist').addEventListener('click',function(){openDistForm(null);});
+  var rc=el('app').querySelectorAll('[data-dist]');
+  for(var i=0;i<rc.length;i++)rc[i].addEventListener('click',function(){
+    var id=this.getAttribute('data-dist');openDistForm(ST.dist.filter(function(x){return x.id===id;})[0]);});
+}
+function openDistForm(rec){
+  rec=rec||{};
+  var isNew=!rec.id;
+  var codes=ST.mdl.map(function(r){return r.DocCode;}).filter(Boolean);
+  var body='<form id="distForm">'+
+    '<div class="fld"><label>รหัสเอกสาร <span class="req">*</span></label>'+
+      '<input list="dcodes" class="mono" data-f="DocCode" data-req="รหัสเอกสาร" value="'+esc(rec.DocCode||'')+'" placeholder="เลือก/พิมพ์รหัส"></div>'+
+    '<datalist id="dcodes">'+codes.map(function(c){return '<option value="'+esc(c)+'">';}).join('')+'</datalist>'+
+    fld('DocName','ชื่อเอกสาร','text',{val:rec.DocName})+
+    fld('Rev','Revision','text',{mono:1,val:rec.Rev})+
+    fld('HolderName','ผู้ถือครอง (Holder)','text',{req:1,val:rec.HolderName})+
+    fldSelect('Department','แผนกผู้ถือครอง',DEPTS,{val:rec.Department})+
+    fld('CopyNo','ชุดที่ (Copy No.)','text',{val:rec.CopyNo,ph:'เช่น 1, 2'})+
+    fldSelect('CopyType','ประเภทสำเนา',COPYTYPES,{val:rec.CopyType})+
+    fld('IssuedDate','วันที่แจกจ่าย','date',{val:rec.IssuedDate||new Date().toISOString().slice(0,10)})+
+    fldSelect('Status','สถานะ',DIST_STATUS,{val:rec.Status})+
+    fld('ReturnedDate','วันที่เรียกคืน','date',{val:rec.ReturnedDate})+
+    fld('Notes','หมายเหตุ','textarea',{val:rec.Notes})+
+    '<button type="submit" class="btn btn-pri" id="saveDist" style="margin-top:6px">&#10003; บันทึก</button>'+
+    (isNew?'':'<button type="button" class="btn btn-ghost" id="delDist" style="margin-top:10px;color:var(--red-ink)">ลบรายการ</button>')+
+  '</form>';
+  openSheet(isNew?'แจกจ่ายเอกสาร':'แก้ไขบันทึกแจกจ่าย',body);
+  el('distForm').addEventListener('submit',function(e){
+    e.preventDefault();
+    var miss=requiredMissing(el('distForm'));if(miss){toast('กรุณากรอก: '+miss);return;}
+    var data=collect(el('distForm'));
+    var btn=el('saveDist');btn.disabled=true;btn.textContent='กำลังบันทึก…';
+    var p=isNew?api('POST','/dist',data):api('PUT','/dist/'+rec.id,data);
+    p.then(function(){closeSheet();toast('บันทึกแล้ว ✓');navigate('dist');})
+     .catch(function(err){toast('บันทึกไม่สำเร็จ: '+err.message);btn.disabled=false;btn.innerHTML='&#10003; บันทึก';});
+  });
+  if(!isNew)el('delDist').addEventListener('click',function(){
+    if(!confirm('ลบรายการนี้?'))return;
+    api('DELETE','/dist/'+rec.id).then(function(){closeSheet();toast('ลบแล้ว');navigate('dist');}).catch(function(e){toast('ลบไม่สำเร็จ');});
   });
 }
 
@@ -724,9 +862,11 @@ function openMdlForm(rec){
     fld('FileLink','ลิงก์ไฟล์','url',{val:rec.FileLink})+
     fld('Notes','หมายเหตุ','textarea',{val:rec.Notes})+
     '<button type="submit" class="btn btn-pri" id="saveMdl" style="margin-top:6px">&#10003; บันทึก</button>'+
+    (isNew?'':'<button type="button" class="btn btn-ghost" id="distMdl" style="margin-top:10px">📦 แจกจ่ายเอกสารนี้</button>')+
     (isNew?'':'<button type="button" class="btn btn-ghost" id="delMdl" style="margin-top:10px;color:var(--red-ink)">ลบเอกสารนี้</button>')+
    '</form>';
   openSheet(isNew?'เพิ่มเอกสารใหม่':'แก้ไขเอกสาร',body);
+  if(!isNew)el('distMdl').addEventListener('click',function(){closeSheet();openDistForm({DocCode:rec.DocCode,DocName:rec.DocName,Rev:rec.Rev});});
   el('mdlForm').addEventListener('submit',function(e){
     e.preventDefault();
     var miss=requiredMissing(el('mdlForm'));if(miss){toast('กรุณากรอก: '+miss);return;}
@@ -759,8 +899,12 @@ function openRequest(id){
     '<div style="display:flex;gap:8px;margin-top:6px">'+
       '<button class="btn btn-pri" id="appr" style="background:var(--green)">&#10003; อนุมัติ</button>'+
       '<button class="btn btn-pri" id="rej" style="background:var(--red)">&#10006; ปฏิเสธ</button></div>'+
+    '<button class="btn btn-ghost" id="printDar" style="margin-top:10px">🖨️ พิมพ์ใบ DAR (FM-MR-01)</button>'+
+    (r.Decision==='APPROVED'?'<button class="btn btn-ghost" id="distDoc" style="margin-top:10px">📦 แจกจ่ายเอกสารนี้</button>':'')+
     '<button class="btn btn-ghost" id="delReq" style="margin-top:10px;color:var(--red-ink)">ลบคำร้อง</button>';
   openSheet('รายละเอียดคำร้อง',body);
+  el('printDar').addEventListener('click',function(){window.open('/dar/'+r.id,'_blank');});
+  if(el('distDoc'))el('distDoc').addEventListener('click',function(){closeSheet();openDistForm({DocCode:r.DocCode,DocName:r.DocName});});
   var decide=function(dec){
     var data={Decision:dec,DecisionBy:el('modalRoot').querySelector('[data-f=DecisionBy]').value,
       Comment:el('modalRoot').querySelector('[data-f=Comment]').value,DecisionTime:new Date().toISOString()};
