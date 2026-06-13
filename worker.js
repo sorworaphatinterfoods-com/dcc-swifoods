@@ -766,14 +766,15 @@ function viewExpiry(){
 }
 
 /* ---------- file upload (to R2 via the Worker) ---------- */
-function uploadFile(file){
-  var status=el('upStatus');
+function uploadFile(file,field,statusId){
+  field=field||'DraftFileLink';
+  var status=el(statusId||'upStatus');
   if(file.size>25*1024*1024){status.textContent='ไฟล์ใหญ่เกิน 25MB';return;}
   status.textContent='กำลังอัปโหลด… '+file.name;
   fetch('/api/upload?name='+encodeURIComponent(file.name),{method:'POST',headers:{'content-type':file.type||'application/octet-stream'},body:file})
     .then(function(r){return r.json();})
     .then(function(j){
-      if(j&&j.url){var inp=document.querySelector('[data-f=DraftFileLink]');if(inp)inp.value=j.url;
+      if(j&&j.url){var inp=document.querySelector('[data-f='+field+']');if(inp)inp.value=j.url;
         status.innerHTML='✓ แนบแล้ว: <a href="'+esc(j.url)+'" target="_blank" style="color:var(--blue)">'+esc(file.name)+'</a>';}
       else{status.textContent='อัปโหลดไม่สำเร็จ: '+((j&&j.error)||'unknown');}
     })
@@ -835,7 +836,7 @@ function viewCreate(){
      '<button type="submit" class="btn btn-pri" id="submitReq">&#9993; ส่งคำร้อง</button>'+
    '</form>';
   el('upBtn').addEventListener('click',function(){el('upFile').click();});
-  el('upFile').addEventListener('change',function(e){var ff=e.target.files&&e.target.files[0];if(ff)uploadFile(ff);});
+  el('upFile').addEventListener('change',function(e){var ff=e.target.files&&e.target.files[0];if(ff)uploadFile(ff,'DraftFileLink','upStatus');});
   el('genCodeBtn').addEventListener('click',genCode);
   el('reqForm').addEventListener('submit',function(e){
     e.preventDefault();
@@ -893,13 +894,21 @@ function openMdlForm(rec){
     fldSelect('Status','สถานะ',STATUSES,{val:rec.Status})+
     fld('EffectiveDate','วันบังคับใช้','date',{val:rec.EffectiveDate})+
     fld('NextReviewDate','ทบทวนครั้งถัดไป','date',{val:rec.NextReviewDate})+
-    fld('FileLink','ลิงก์ไฟล์','url',{val:rec.FileLink})+
+    '<div class="fld"><label>เอกสารฉบับเต็ม (ฉบับอนุมัติ)</label>'+
+      '<input type="url" data-f="FileLink" placeholder="วางลิงก์ หรือกดอัปโหลดไฟล์ฉบับเต็ม" value="'+esc(rec.FileLink||'')+'">'+
+      '<div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap">'+
+        '<button type="button" class="btn btn-ghost btn-sm" id="upBtnM">📎 อัปโหลดเอกสารฉบับเต็ม</button>'+
+        '<input type="file" id="upFileM" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" style="display:none">'+
+        '<span id="upStatusM" style="font-size:12.5px;color:var(--muted)">'+(rec.FileLink?'มีไฟล์แนบแล้ว':'')+'</span>'+
+      '</div></div>'+
     fld('Notes','หมายเหตุ','textarea',{val:rec.Notes})+
     '<button type="submit" class="btn btn-pri" id="saveMdl" style="margin-top:6px">&#10003; บันทึก</button>'+
     (isNew?'':'<button type="button" class="btn btn-ghost" id="distMdl" style="margin-top:10px">📦 แจกจ่ายเอกสารนี้</button>')+
     (isNew?'':'<button type="button" class="btn btn-ghost" id="delMdl" style="margin-top:10px;color:var(--red-ink)">ลบเอกสารนี้</button>')+
    '</form>';
   openSheet(isNew?'เพิ่มเอกสารใหม่':'แก้ไขเอกสาร',body);
+  el('upBtnM').addEventListener('click',function(){el('upFileM').click();});
+  el('upFileM').addEventListener('change',function(e){var ff=e.target.files&&e.target.files[0];if(ff)uploadFile(ff,'FileLink','upStatusM');});
   if(!isNew)el('distMdl').addEventListener('click',function(){closeSheet();openDistForm({DocCode:rec.DocCode,DocName:rec.DocName,Rev:rec.Rev});});
   el('mdlForm').addEventListener('submit',function(e){
     e.preventDefault();
