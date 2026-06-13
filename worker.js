@@ -350,6 +350,15 @@ export default {
     if (url.pathname === '/submit' || url.pathname === '/submit/') {
       return new Response(SUBMIT_HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     }
+    if (url.pathname === '/manifest.webmanifest') {
+      return new Response(MANIFEST_JSON, { headers: { 'content-type': 'application/manifest+json; charset=utf-8' } });
+    }
+    if (url.pathname === '/icon.svg') {
+      return new Response(ICON_SVG, { headers: { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'public, max-age=86400' } });
+    }
+    if (url.pathname === '/sw.js') {
+      return new Response(SW_JS, { headers: { 'content-type': 'text/javascript; charset=utf-8' } });
+    }
     if (url.pathname === '/' || url.pathname === '') {
       return new Response(HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     }
@@ -363,6 +372,12 @@ const HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Document Control Center</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#15803d">
+<link rel="icon" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="DCC">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -983,6 +998,7 @@ el('scrim').addEventListener('click',function(){openDrawer(false);});
 el('refreshBtn').addEventListener('click',function(){render();});
 var navas=el('nav').querySelectorAll('a');
 for(var i=0;i<navas.length;i++)navas[i].addEventListener('click',function(){navigate(this.getAttribute('data-nav'));});
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 setNav();
 if(KEY){render();}else{showLogin();}
 </script>
@@ -1054,6 +1070,7 @@ textarea{resize:vertical;min-height:80px}
 </div>
 <script>
 function el(id){return document.getElementById(id);}
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 function api(method,path,body){return fetch(path,{method:method,headers:{'content-type':'application/json'},body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j&&j.error?j.error:('HTTP '+r.status));return j;});});}
 function collect(){var rec={};var els=document.querySelectorAll('[data-f]');for(var i=0;i<els.length;i++){var v=els[i].value;if(v!=='')rec[els[i].getAttribute('data-f')]=v;}return rec;}
 function missing(){var els=document.querySelectorAll('[data-req]');var m=[];for(var i=0;i<els.length;i++){if(!String(els[i].value||'').trim())m.push(els[i].getAttribute('data-req'));}return m;}
@@ -1066,3 +1083,45 @@ el('f').addEventListener('submit',function(e){e.preventDefault();var miss=missin
 </script>
 </body>
 </html>`;
+
+// ---- PWA assets (install as a desktop/mobile app) ----
+const MANIFEST_JSON = JSON.stringify({
+  name: 'DCC — ระบบควบคุมเอกสาร',
+  short_name: 'DCC',
+  description: 'Document Control Center · Sorworaphat InterFoods',
+  start_url: '/',
+  scope: '/',
+  display: 'standalone',
+  background_color: '#eef4f0',
+  theme_color: '#15803d',
+  lang: 'th',
+  icons: [
+    { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+    { src: '/icon.svg', sizes: '512x512', type: 'image/svg+xml', purpose: 'maskable' },
+  ],
+});
+
+const ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1fae5f"/><stop offset="1" stop-color="#0d9488"/></linearGradient></defs>
+<rect width="512" height="512" rx="112" fill="url(#g)"/>
+<rect x="150" y="120" width="212" height="272" rx="20" fill="#ffffff"/>
+<rect x="186" y="170" width="140" height="16" rx="8" fill="#cfe9da"/>
+<rect x="186" y="208" width="140" height="16" rx="8" fill="#cfe9da"/>
+<rect x="186" y="246" width="92" height="16" rx="8" fill="#cfe9da"/>
+<circle cx="320" cy="330" r="58" fill="#15803d"/>
+<path d="M296 330 l18 18 l34 -38" fill="none" stroke="#ffffff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
+
+const SW_JS = `const C='dcc-v1';
+self.addEventListener('install',function(e){self.skipWaiting();});
+self.addEventListener('activate',function(e){e.waitUntil(self.clients.claim());});
+self.addEventListener('fetch',function(e){
+  var req=e.request;
+  if(req.method!=='GET')return;
+  e.respondWith(
+    fetch(req).then(function(r){
+      if(r&&r.status===200&&r.type==='basic'){var cp=r.clone();caches.open(C).then(function(c){c.put(req,cp);});}
+      return r;
+    }).catch(function(){return caches.match(req);})
+  );
+});`;
