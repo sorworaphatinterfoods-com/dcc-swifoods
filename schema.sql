@@ -1,45 +1,49 @@
--- Document Control System — D1 schema (already applied to dcs_document_control)
--- Recreate locally / on another DB with:
+-- Document Control System — D1 schema (database: dcs_document_control)
+-- Apply with:
 --   wrangler d1 execute dcs_document_control --remote --file=./schema.sql
 
 CREATE TABLE IF NOT EXISTS mdl (
-  id            TEXT PRIMARY KEY,
-  DocCode       TEXT NOT NULL,
-  DocType       TEXT,
-  DocName       TEXT,
-  Department    TEXT,
-  OwnerName     TEXT,
-  OwnerEmail    TEXT,
-  ApproverName  TEXT,
-  ApproverEmail TEXT,
-  Rev           TEXT,
-  Status        TEXT,
-  IssueDate     TEXT,
-  EffectiveDate TEXT,
+  id             TEXT PRIMARY KEY,
+  DocCode        TEXT NOT NULL,
+  DocType        TEXT,
+  DocName        TEXT,
+  Department     TEXT,
+  OwnerName      TEXT,
+  OwnerEmail     TEXT,
+  ApproverName   TEXT,
+  ApproverEmail  TEXT,
+  Rev            TEXT,
+  Status         TEXT,
+  IssueDate      TEXT,
+  EffectiveDate  TEXT,
   NextReviewDate TEXT,
-  Keyword       TEXT,
-  FileLink      TEXT,
-  Notes         TEXT,
-  updated_at    TEXT
+  Keyword        TEXT,
+  FileLink       TEXT,
+  Notes          TEXT,
+  updated_at     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS approval_log (
-  id            TEXT PRIMARY KEY,
-  Timestamp     TEXT,
-  RequestId     TEXT,
-  DocCode       TEXT,
-  RequestedRev  TEXT,
-  RequesterName TEXT,
+  id             TEXT PRIMARY KEY,
+  Timestamp      TEXT,
+  RequestId      TEXT,
+  DocCode        TEXT,
+  ActionType     TEXT,
+  DocType        TEXT,
+  DocName        TEXT,
+  Department     TEXT,
+  RequestedRev   TEXT,
+  RequesterName  TEXT,
   RequesterEmail TEXT,
-  ApproverName  TEXT,
-  ApproverEmail TEXT,
-  DraftFileLink TEXT,
-  Reason        TEXT,
-  Decision      TEXT,
-  DecisionBy    TEXT,
-  DecisionTime  TEXT,
-  Comment       TEXT,
-  updated_at    TEXT
+  ApproverName   TEXT,
+  ApproverEmail  TEXT,
+  DraftFileLink  TEXT,
+  Reason         TEXT,
+  Decision       TEXT,
+  DecisionBy     TEXT,
+  DecisionTime   TEXT,
+  Comment        TEXT,
+  updated_at     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ack_log (

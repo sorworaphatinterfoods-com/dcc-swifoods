@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1080" viewBox="0 0 900 1080" font-family="'Noto Sans Thai','Sarabun','Leelawadee UI',sans-serif">
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1fae5f"/><stop offset="1" stop-color="#0d9488"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#15803d"/><stop offset="1" stop-color="#0f766e"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#0f766e"/>
+    </marker>
+    <marker id="arrowR" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#c62f2f"/>
+    </marker>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f766e" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <rect width="900" height="1080" fill="#eef6f0"/>
+
+  <!-- header -->
+  <rect x="0" y="0" width="900" height="86" fill="url(#bar)"/>
+  <text x="36" y="40" fill="#ffffff" font-size="25" font-weight="700">ระบบควบคุมเอกสาร (DCC) — Flow การใช้งาน</text>
+  <text x="36" y="68" fill="#dcefe6" font-size="15">อ้างอิงระเบียบปฏิบัติ QP-DC-01 · DAR (FM-MR-01) · Master List (FM-MR-02)</text>
+
+  <!-- roles legend -->
+  <text x="36" y="122" fill="#1f2a26" font-size="15" font-weight="700">บทบาท</text>
+  <g font-size="14">
+    <rect x="118" y="104" width="160" height="30" rx="15" fill="#e4f5ec" stroke="#159a57"/>
+    <text x="198" y="124" fill="#15803d" text-anchor="middle">ผู้จัดทำ (Owner)</text>
+    <rect x="290" y="104" width="222" height="30" rx="15" fill="#e4f5ec" stroke="#159a57"/>
+    <text x="401" y="124" fill="#15803d" text-anchor="middle">ผู้ทบทวน (หัวหน้าแผนก/MR)</text>
+    <rect x="524" y="104" width="146" height="30" rx="15" fill="#e4f5ec" stroke="#159a57"/>
+    <text x="597" y="124" fill="#15803d" text-anchor="middle">ผู้อนุมัติ (MD)</text>
+    <rect x="682" y="104" width="184" height="30" rx="15" fill="#fff5e6" stroke="#b4690e"/>
+    <text x="774" y="124" fill="#b4690e" text-anchor="middle">DCC (คุมเอกสาร)</text>
+  </g>
+
+  <!-- ===== center column: x 270..690 ===== -->
+  <!-- 1 -->
+  <g filter="url(#sh)">
+    <rect x="270" y="170" width="420" height="96" rx="15" fill="#ffffff" stroke="#e6efe9"/>
+    <rect x="270" y="170" width="7" height="96" rx="3.5" fill="url(#grad)"/>
+  </g>
+  <circle cx="305" cy="200" r="17" fill="url(#grad)"/>
+  <text x="305" y="207" fill="#fff" font-size="18" font-weight="700" text-anchor="middle">1</text>
+  <text x="338" y="202" fill="#16221d" font-size="18" font-weight="700">สร้างคำร้อง (DAR)</text>
+  <text x="338" y="228" fill="#45504a" font-size="14.5">เมนู “สร้างคำร้อง” · กรอกข้อมูล + แนบไฟล์ + วันคาดว่าจะเสร็จ</text>
+  <text x="338" y="251" fill="#15803d" font-size="14" font-weight="600">ผู้จัดทำ → กด “ส่งคำร้อง”  (สถานะ = PENDING)</text>
+
+  <line x1="480" y1="266" x2="480" y2="304" stroke="#0f766e" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <!-- 2 -->
+  <g filter="url(#sh)">
+    <rect x="270" y="306" width="420" height="92" rx="15" fill="#ffffff" stroke="#e6efe9"/>
+    <rect x="270" y="306" width="7" height="92" rx="3.5" fill="url(#grad)"/>
+  </g>
+  <circle cx="305" cy="336" r="17" fill="url(#grad)"/>
+  <text x="305" y="343" fill="#fff" font-size="18" font-weight="700" text-anchor="middle">2</text>
+  <text x="338" y="338" fill="#16221d" font-size="18" font-weight="700">แจ้งเตือนอัตโนมัติ ✉</text>
+  <text x="338" y="364" fill="#45504a" font-size="14.5">ระบบส่งอีเมลหา qa_admin@ ทันที พร้อมรายละเอียด + ลิงก์</text>
+  <text x="338" y="387" fill="#15803d" font-size="14" font-weight="600">อัตโนมัติ — ไม่ต้องทำเอง</text>
+
+  <line x1="480" y1="398" x2="480" y2="436" stroke="#0f766e" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <!-- 3 decision -->
+  <g filter="url(#sh)">
+    <rect x="270" y="438" width="420" height="100" rx="15" fill="#ffffff" stroke="#e6efe9"/>
+    <rect x="270" y="438" width="7" height="100" rx="3.5" fill="#f59e0b"/>
+  </g>
+  <circle cx="305" cy="470" r="17" fill="#f59e0b"/>
+  <text x="305" y="477" fill="#fff" font-size="18" font-weight="700" text-anchor="middle">3</text>
+  <text x="338" y="472" fill="#16221d" font-size="18" font-weight="700">พิจารณาคำร้อง</text>
+  <text x="338" y="498" fill="#45504a" font-size="14.5">เมนู “คำร้องทั้งหมด” → เปิดคำร้อง ใส่ผู้ตัดสิน + ความเห็น</text>
+  <text x="338" y="521" fill="#b4690e" font-size="14" font-weight="600">ผู้ทบทวน (MR) → ผู้อนุมัติ (MD)</text>
+
+  <!-- reject branch: left lane back to box1 -->
+  <path d="M270,500 L150,500 L150,224 L264,224" fill="none" stroke="#c62f2f" stroke-width="2.5" stroke-dasharray="6,5" marker-end="url(#arrowR)"/>
+  <rect x="78" y="345" width="144" height="34" rx="17" fill="#fdecec" stroke="#c62f2f"/>
+  <text x="150" y="367" fill="#c62f2f" font-size="14.5" font-weight="700" text-anchor="middle">❌ ปฏิเสธ</text>
+  <text x="150" y="398" fill="#c62f2f" font-size="13" text-anchor="middle">ส่งกลับผู้ขอแก้ไข</text>
+
+  <!-- approve: down to box4 -->
+  <line x1="480" y1="538" x2="480" y2="582" stroke="#0f766e" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <rect x="416" y="546" width="128" height="30" rx="15" fill="#e8f7ee" stroke="#15803d"/>
+  <text x="480" y="566" fill="#15803d" font-size="14.5" font-weight="700" text-anchor="middle">✅ อนุมัติ</text>
+
+  <!-- 4 -->
+  <g filter="url(#sh)">
+    <rect x="270" y="584" width="420" height="96" rx="15" fill="#ffffff" stroke="#e6efe9"/>
+    <rect x="270" y="584" width="7" height="96" rx="3.5" fill="url(#grad)"/>
+  </g>
+  <circle cx="305" cy="614" r="17" fill="url(#grad)"/>
+  <text x="305" y="621" fill="#fff" font-size="18" font-weight="700" text-anchor="middle">4</text>
+  <text x="338" y="616" fill="#16221d" font-size="18" font-weight="700">ขึ้นทะเบียน Master List</text>
+  <text x="338" y="642" fill="#45504a" font-size="14.5">เมนู “MDL” (FM-MR-02) · รหัส AA-BB-01, Rev, วันบังคับใช้</text>
+  <text x="338" y="665" fill="#b4690e" font-size="14" font-weight="600">DCC → Status = Active + ตั้งวันทบทวนถัดไป</text>
+
+  <line x1="480" y1="680" x2="480" y2="718" stroke="#0f766e" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <!-- 5 -->
+  <g filter="url(#sh)">
+    <rect x="270" y="720" width="420" height="100" rx="15" fill="#ffffff" stroke="#e6efe9"/>
+    <rect x="270" y="720" width="7" height="100" rx="3.5" fill="url(#grad)"/>
+  </g>
+  <circle cx="305" cy="752" r="17" fill="url(#grad)"/>
+  <text x="305" y="759" fill="#fff" font-size="18" font-weight="700" text-anchor="middle">5</text>
+  <text x="338" y="754" fill="#16221d" font-size="18" font-weight="700">แจกจ่าย + ติดตามทบทวน</text>
+  <text x="338" y="780" fill="#45504a" font-size="14.5">เมนู “Expiry Monitor” · 🔴 เลยกำหนด  🟡 ใกล้ครบ  🟢 ปกติ</text>
+  <text x="338" y="803" fill="#15803d" font-size="14" font-weight="600">ทบทวนอย่างน้อยปีละ 1 ครั้ง (ตาม QP-DC-01)</text>
+
+  <!-- review loop: right lane back to box1 -->
+  <path d="M690,770 L786,770 L786,224 L696,224" fill="none" stroke="#159a57" stroke-width="2.5" stroke-dasharray="6,5" marker-end="url(#arrow)"/>
+  <rect x="704" y="474" width="164" height="50" rx="14" fill="#e4f5ec" stroke="#159a57"/>
+  <text x="786" y="497" fill="#15803d" font-size="14" font-weight="700" text-anchor="middle">🔄 ถึงรอบทบทวน</text>
+  <text x="786" y="516" fill="#15803d" font-size="13.5" text-anchor="middle">ออก DAR ใหม่</text>
+
+  <!-- dashboard -->
+  <g filter="url(#sh)">
+    <rect x="150" y="864" width="600" height="74" rx="15" fill="#ffffff" stroke="#e6efe9"/>
+    <rect x="150" y="864" width="7" height="74" rx="3.5" fill="url(#bar)"/>
+  </g>
+  <text x="184" y="898" fill="#16221d" font-size="17" font-weight="700">📊 Dashboard</text>
+  <text x="184" y="922" fill="#45504a" font-size="14.5">ภาพรวมตลอดเวลา: เอกสารทั้งหมด · รออนุมัติ · อนุมัติแล้ว · ปฏิเสธ + คำร้องล่าสุด</text>
+
+  <!-- status legend -->
+  <text x="150" y="982" fill="#16221d" font-size="15" font-weight="700">สถานะคำร้อง</text>
+  <g font-size="14" font-weight="700">
+    <rect x="262" y="966" width="104" height="28" rx="14" fill="#fff5e6"/><text x="314" y="985" fill="#b4690e" text-anchor="middle">PENDING</text>
+    <rect x="378" y="966" width="116" height="28" rx="14" fill="#e8f7ee"/><text x="436" y="985" fill="#15803d" text-anchor="middle">APPROVED</text>
+    <rect x="506" y="966" width="112" height="28" rx="14" fill="#fdecec"/><text x="562" y="985" fill="#c62f2f" text-anchor="middle">REJECTED</text>
+  </g>
+
+  <text x="150" y="1030" fill="#8a948d" font-size="12.5">Sorworaphat InterFoods · Document Control Center — Cloudflare Worker + D1 + R2 · แจ้งเตือนอีเมลผ่าน Google Apps Script</text>
+</svg>
