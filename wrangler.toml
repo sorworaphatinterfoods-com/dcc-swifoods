@@ -5,8 +5,8 @@ compatibility_date = "2025-06-01"
 # ผูก Worker เข้ากับฐานข้อมูล D1 ที่สร้างไว้แล้ว
 [[d1_databases]]
 binding = "DB"                                       # ใช้เป็น env.DB ในโค้ด
-database_name = "dcs_document_control"
-database_id = "8ce825c6-df55-4b13-bea3-c1ae46465b48"
+database_name = "dcc_swifoods"
+database_id = "f0fb25d2-0261-4b81-9201-56ee16615ccb"
 
 # (ทางเลือก) เปิดการป้องกันด้วย token:
 #   wrangler secret put AUTH_TOKEN
