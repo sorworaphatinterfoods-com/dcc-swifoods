@@ -23,6 +23,9 @@ const NOTIFY_DEFAULT = 'qa.sorworaphat@gmail.com';
 const MAILER_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbyRCJ223DKomrx8wfUiWwcDK1R-wRfvYONVKWwmvKLLcd7Leiy6GVFXehpnQG9dttZoVQ/exec';   // Apps Script mailer web-app
 const MAILER_TOKEN_DEFAULT = 'a4f9c1e8d7b6403a9f2c5e1d8b7a6c3f';
 
+// Password for the admin app (/). Override via Worker var ADMIN_KEY (recommended).
+const ADMIN_KEY_DEFAULT = 'Swifoods@2026';
+
 async function notifyNewRequest(env, r, origin) {
   const url = env.MAILER_URL || MAILER_URL_DEFAULT;
   if (!url) return;                          // mailer not configured yet — skip silently
@@ -313,13 +316,22 @@ export default {
       if (request.method === 'OPTIONS') {
         return new Response(null, { headers: Object.assign({}, J, {
           'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-          'access-control-allow-headers': 'content-type,authorization',
+          'access-control-allow-headers': 'content-type,authorization,x-admin-key',
         }) });
       }
       if (env.AUTH_TOKEN) {
         const a = request.headers.get('authorization') || '';
         if (a !== 'Bearer ' + env.AUTH_TOKEN) return json({ error: 'unauthorized' }, 401);
       }
+      // Admin gate: only request submission, file upload and auto-numbering are
+      // public (used by /submit). Everything else needs the admin key.
+      const adminKey = env.ADMIN_KEY || ADMIN_KEY_DEFAULT;
+      const provided = request.headers.get('x-admin-key') || url.searchParams.get('key') || '';
+      const isPublic =
+        (request.method === 'POST' && url.pathname === '/api/requests') ||
+        (request.method === 'POST' && url.pathname === '/api/upload') ||
+        (request.method === 'GET' && url.pathname === '/api/nextcode');
+      if (!isPublic && provided !== adminKey) return json({ error: 'unauthorized', login: true }, 401);
       if (url.pathname === '/api/upload' && request.method === 'POST') {
         return await uploadHandler(request, env, url);  // body not pre-parsed here
       }
@@ -328,6 +340,8 @@ export default {
     }
     if (url.pathname.startsWith('/files/')) return serveFile(env, url);
     if (url.pathname.startsWith('/dar/')) {
+      const adminKey = env.ADMIN_KEY || ADMIN_KEY_DEFAULT;
+      if ((url.searchParams.get('key') || '') !== adminKey) return new Response('unauthorized', { status: 401 });
       const rid = decodeURIComponent(url.pathname.replace(/^\/dar\//, ''));
       const r = await env.DB.prepare('SELECT * FROM approval_log WHERE id=? OR RequestId=?').bind(rid, rid).first();
       if (!r) return new Response('not found', { status: 404 });
@@ -499,12 +513,29 @@ function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'
 function toast(m){var t=el('toast');t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},2200);}
 function fmtDate(v){if(!v)return '—';var d=new Date(v);if(isNaN(d))return v;return d.toLocaleDateString('th-TH',{year:'numeric',month:'short',day:'numeric'});}
 
+var KEY=localStorage.getItem('dcc_key')||'';
 function api(method,path,body){
-  return fetch('/api'+path,{method:method,headers:{'content-type':'application/json'},body:body?JSON.stringify(body):undefined})
+  return fetch('/api'+path,{method:method,headers:{'content-type':'application/json','x-admin-key':KEY},body:body?JSON.stringify(body):undefined})
     .then(function(r){
+      if(r.status===401){showLogin('รหัสผ่านไม่ถูกต้อง หรือหมดสิทธิ์');throw new Error('unauthorized');}
       if(r.status===204)return null;
       return r.json().then(function(j){ if(!r.ok) throw new Error(j&&j.error?j.error:('HTTP '+r.status)); return j; });
     });
+}
+function showLogin(msg){
+  el('modalRoot').innerHTML='<div class="overlay" id="ov"><div class="sheet" style="max-width:380px">'+
+    '<div class="sheet-h"><h3>🔒 เข้าสู่ระบบ DCC</h3></div>'+
+    '<p style="font-size:13px;color:var(--muted);margin-bottom:12px">สำหรับเจ้าหน้าที่ QA / DCC เท่านั้น</p>'+
+    (msg?'<p style="color:var(--red-ink);font-size:13px;margin-bottom:10px">'+esc(msg)+'</p>':'')+
+    '<div class="fld"><input type="password" id="pw" placeholder="รหัสผ่าน"></div>'+
+    '<button class="btn btn-pri" id="loginBtn" style="margin-top:6px">เข้าสู่ระบบ</button></div></div>';
+  el('loginBtn').onclick=doLogin;
+  el('pw').addEventListener('keydown',function(e){if(e.key==='Enter')doLogin();});
+  el('pw').focus();
+}
+function doLogin(){
+  KEY=el('pw').value;
+  api('GET','/stats').then(function(){localStorage.setItem('dcc_key',KEY);closeSheet();render();}).catch(function(){});
 }
 
 /* ---------- drawer / nav ---------- */
@@ -906,7 +937,7 @@ function openRequest(id){
     (r.Decision==='APPROVED'?'<button class="btn btn-ghost" id="distDoc" style="margin-top:10px">📦 แจกจ่ายเอกสารนี้</button>':'')+
     '<button class="btn btn-ghost" id="delReq" style="margin-top:10px;color:var(--red-ink)">ลบคำร้อง</button>';
   openSheet('รายละเอียดคำร้อง',body);
-  el('printDar').addEventListener('click',function(){window.open('/dar/'+r.id,'_blank');});
+  el('printDar').addEventListener('click',function(){window.open('/dar/'+r.id+'?key='+encodeURIComponent(KEY),'_blank');});
   if(el('distDoc'))el('distDoc').addEventListener('click',function(){closeSheet();openDistForm({DocCode:r.DocCode,DocName:r.DocName});});
   var decide=function(dec){
     var data={Decision:dec,DecisionBy:el('modalRoot').querySelector('[data-f=DecisionBy]').value,
@@ -943,7 +974,8 @@ el('scrim').addEventListener('click',function(){openDrawer(false);});
 el('refreshBtn').addEventListener('click',function(){render();});
 var navas=el('nav').querySelectorAll('a');
 for(var i=0;i<navas.length;i++)navas[i].addEventListener('click',function(){navigate(this.getAttribute('data-nav'));});
-setNav();render();
+setNav();
+if(KEY){render();}else{showLogin();}
 </script>
 </body>
 </html>`;
