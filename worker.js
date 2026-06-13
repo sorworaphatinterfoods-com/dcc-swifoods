@@ -87,6 +87,71 @@ async function updateRow(db, table, id, obj) {
   await db.prepare('UPDATE ' + table + ' SET ' + sets + ' WHERE id=?').bind(...vals).run();
 }
 
+// Compute the next running document code (AA-BB-NN) per QP-DC-01, scanning
+// both the master list and existing requests so numbers never collide.
+async function nextDocCode(db, type, dept) {
+  type = String(type || '').toUpperCase().replace(/[^A-Z]/g, '');
+  dept = String(dept || '').toUpperCase().replace(/[^A-Z]/g, '');
+  if (!type || !dept) return null;
+  const prefix = type + '-' + dept + '-';
+  let max = 0;
+  const scan = function (rows) {
+    (rows.results || []).forEach(function (x) {
+      const m = String(x.DocCode || '').slice(prefix.length).match(/^(\d+)/);
+      if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; }
+    });
+  };
+  scan(await db.prepare('SELECT DocCode FROM mdl WHERE DocCode LIKE ?').bind(prefix + '%').all());
+  scan(await db.prepare('SELECT DocCode FROM approval_log WHERE DocCode LIKE ?').bind(prefix + '%').all());
+  return prefix + String(max + 1).padStart(2, '0');
+}
+
+// When a request is APPROVED, keep the master list (FM-MR-02) in sync:
+//   new doc  -> register as Active (Rev 00, review +1yr)
+//   cancel   -> mark the matching document Obsolete
+async function syncMdlFromRequest(db, r) {
+  if (!r || !r.DocCode) return;
+  const existing = await db.prepare('SELECT id FROM mdl WHERE DocCode=?').bind(r.DocCode).first();
+  if (/ยกเลิก/.test(r.ActionType || '')) {
+    if (existing) await db.prepare("UPDATE mdl SET Status='Obsolete', updated_at=? WHERE id=?").bind(now(), existing.id).run();
+    return;
+  }
+  if (existing) return;   // already registered (e.g. revision) — leave it to DCC
+  const today = new Date().toISOString().slice(0, 10);
+  const review = new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10);
+  await insertRow(db, 'mdl', {
+    DocCode: r.DocCode, DocType: r.DocType, DocName: r.DocName, Department: r.Department,
+    OwnerName: r.RequesterName, Rev: '00', Status: 'Active', EffectiveDate: today,
+    NextReviewDate: review, FileLink: r.DraftFileLink,
+    Notes: 'ขึ้นทะเบียนอัตโนมัติจากคำร้อง ' + (r.RequestId || ''),
+  });
+}
+
+// Email the requester the outcome (only when they provided an email).
+async function notifyDecision(env, r, origin) {
+  const url = env.MAILER_URL || MAILER_URL_DEFAULT;
+  const to = r && r.RequesterEmail;
+  if (!url || !to) return;
+  const token = env.MAILER_TOKEN || MAILER_TOKEN_DEFAULT;
+  const ok = r.Decision === 'APPROVED';
+  const e = function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+  const subject = '[DCC] ผลคำร้อง ' + (r.DocCode || '') + ' — ' + (ok ? 'อนุมัติ' : 'ไม่อนุมัติ');
+  const html = '<div style="font-family:Arial,Helvetica,sans-serif;max-width:620px">' +
+    '<h2 style="color:' + (ok ? '#15803d' : '#c62f2f') + '">' + (ok ? '✅ คำร้องได้รับการอนุมัติ' : '❌ คำร้องไม่ได้รับการอนุมัติ') + '</h2>' +
+    '<p style="font-size:13px;color:#6b7280">ตามระเบียบปฏิบัติ QP-DC-01 · DAR (FM-MR-01)</p>' +
+    '<p>เรียน คุณ' + e(r.RequesterName || '') + '</p>' +
+    '<p>คำร้อง <b>' + e(r.RequestId || '') + '</b> เอกสาร <b>' + e(r.DocCode || '') + ' ' + e(r.DocName || '') + '</b> ' +
+    (ok ? 'ได้รับการอนุมัติแล้ว และถูกขึ้นทะเบียนในบัญชีแม่บท (MDL)' : 'ไม่ได้รับการอนุมัติ') + '</p>' +
+    (r.DecisionBy ? '<p>ผู้ตัดสิน: ' + e(r.DecisionBy) + '</p>' : '') +
+    (r.Comment ? '<p>ความเห็น: ' + e(r.Comment) + '</p>' : '') +
+    (origin ? '<p style="margin-top:14px"><a href="' + origin + '" style="background:#15803d;color:#fff;padding:9px 16px;border-radius:8px;text-decoration:none">เปิดระบบ DCC</a></p>' : '') +
+    '</div>';
+  try {
+    await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: token, to: to, subject: subject, html: html }) });
+  } catch (err) { /* ignore */ }
+}
+
 async function api(request, env, url, ctx) {
   const db = env.DB;
   const seg = url.pathname.replace(/^\/api\/?/, '').split('/').filter(Boolean); // [resource, id?]
@@ -104,6 +169,12 @@ async function api(request, env, url, ctx) {
     const rejected = await c("SELECT COUNT(*) c FROM approval_log WHERE Decision='REJECTED'");
     const recent = await db.prepare('SELECT * FROM approval_log ORDER BY Timestamp DESC LIMIT 6').all();
     return json({ mdlTotal: mdlTotal, pending: pending, approved: approved, rejected: rejected, recent: recent.results || [] });
+  }
+
+  if (resource === 'nextcode') {
+    const code = await nextDocCode(db, url.searchParams.get('type'), url.searchParams.get('dept'));
+    if (!code) return json({ error: 'type & dept required' }, 400);
+    return json({ code: code });
   }
 
   const table = resource === 'mdl' ? 'mdl' : resource === 'requests' ? 'approval_log' : null;
@@ -133,6 +204,12 @@ async function api(request, env, url, ctx) {
     if (!id) return json({ error: 'id required' }, 400);
     await updateRow(db, table, id, pick(body, cols));
     const row = await db.prepare('SELECT * FROM ' + table + ' WHERE id=?').bind(id).first();
+    if (table === 'approval_log' && row) {
+      if (row.Decision === 'APPROVED') await syncMdlFromRequest(db, row);   // register/obsolete in MDL
+      if ((row.Decision === 'APPROVED' || row.Decision === 'REJECTED') && ctx && typeof ctx.waitUntil === 'function') {
+        ctx.waitUntil(notifyDecision(env, row, url.origin));               // email the requester
+      }
+    }
     return json(row);
   }
   if (method === 'DELETE') {
@@ -531,6 +608,21 @@ function uploadFile(file){
     .catch(function(err){status.textContent='อัปโหลดไม่สำเร็จ: '+err.message;});
 }
 
+/* ---------- auto document-number (AA-BB-NN per QP-DC-01) ---------- */
+function genCode(){
+  var t=document.querySelector('[data-f=DocType]'),d=document.querySelector('[data-f=Department]');
+  var type=t?t.value:'',dept=d?d.value:'';
+  var st=el('codeStatus');
+  if(!type||!dept){if(st)st.textContent='เลือกประเภทเอกสาร + แผนกก่อน';return;}
+  if(st)st.textContent='กำลังออกเลข…';
+  fetch('/api/nextcode?type='+encodeURIComponent(type)+'&dept='+encodeURIComponent(dept))
+    .then(function(r){return r.json();})
+    .then(function(j){var inp=document.querySelector('[data-f=DocCode]');
+      if(j&&j.code&&inp){inp.value=j.code;if(st)st.innerHTML='✓ ออกเลขให้แล้ว';}
+      else if(st)st.textContent='ออกเลขไม่สำเร็จ';})
+    .catch(function(){if(st)st.textContent='ออกเลขไม่สำเร็จ';});
+}
+
 /* ---------- create request (full page form) ---------- */
 function viewCreate(){
   el('topTitle').textContent='สร้างคำร้อง';
@@ -540,6 +632,7 @@ function viewCreate(){
    '<form id="reqForm">'+
      '<div class="card fsec"><div class="fsec-t"><span class="num">1</span>ข้อมูลผู้ร้องขอ</div>'+
        fld('RequesterName','ชื่อ-นามสกุล ผู้ส่งคำร้อง','text',{req:1,ph:'ชื่อ-นามสกุล'})+
+       fld('RequesterEmail','อีเมลผู้ขอ (สำหรับรับแจ้งผล)','email',{ph:'name@company.com'})+
        fldSelect('Department','แผนก (Department)',DEPTS,{req:1})+
      '</div>'+
      '<div class="card fsec"><div class="fsec-t"><span class="num">2</span>ประเภทคำขอ</div>'+
@@ -548,7 +641,12 @@ function viewCreate(){
      '<div class="card fsec"><div class="fsec-t"><span class="num">3</span>ข้อมูลเอกสาร</div>'+
        fldSelect('DocType','ประเภทเอกสาร',DOCTYPES,{req:1})+
        fld('DocName','ชื่อเอกสาร (ไทย/อังกฤษ)','text',{req:1,ph:'เช่น ขั้นตอนการตรวจรับวัตถุดิบ'})+
-       fld('DocCode','รหัสเอกสาร','text',{ph:'เช่น SOP-PD-001',mono:1})+
+       '<div class="fld"><label>รหัสเอกสาร</label>'+
+         '<input type="text" class="mono" data-f="DocCode" placeholder="เช่น QP-QA-03 หรือกดออกเลขอัตโนมัติ" value="">'+
+         '<div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap">'+
+           '<button type="button" class="btn btn-ghost btn-sm" id="genCodeBtn">🔢 ออกเลขอัตโนมัติ</button>'+
+           '<span id="codeStatus" style="font-size:12.5px;color:var(--muted)"></span>'+
+         '</div></div>'+
        '<div class="fld"><label>ไฟล์ฉบับร่าง (Draft File)</label>'+
          '<input type="url" data-f="DraftFileLink" placeholder="วางลิงก์ หรือกดอัปโหลดไฟล์ด้านล่าง" value="">'+
          '<div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap">'+
@@ -566,6 +664,7 @@ function viewCreate(){
    '</form>';
   el('upBtn').addEventListener('click',function(){el('upFile').click();});
   el('upFile').addEventListener('change',function(e){var ff=e.target.files&&e.target.files[0];if(ff)uploadFile(ff);});
+  el('genCodeBtn').addEventListener('click',genCode);
   el('reqForm').addEventListener('submit',function(e){
     e.preventDefault();
     var rec=collect(el('reqForm'));
