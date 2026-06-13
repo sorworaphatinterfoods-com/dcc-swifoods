@@ -333,6 +333,9 @@ export default {
       if (!r) return new Response('not found', { status: 404 });
       return new Response(darHtml(r), { headers: { 'content-type': 'text/html; charset=utf-8' } });
     }
+    if (url.pathname === '/submit' || url.pathname === '/submit/') {
+      return new Response(SUBMIT_HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    }
     if (url.pathname === '/' || url.pathname === '') {
       return new Response(HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     }
@@ -941,6 +944,84 @@ el('refreshBtn').addEventListener('click',function(){render();});
 var navas=el('nav').querySelectorAll('a');
 for(var i=0;i<navas.length;i++)navas[i].addEventListener('click',function(){navigate(this.getAttribute('data-nav'));});
 setNav();render();
+</script>
+</body>
+</html>`;
+
+// ---- Submit-only page (/submit) for other departments: create requests only ----
+const SUBMIT_HTML = `<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ยื่นคำร้องด้านเอกสาร · DAR</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--ink:#1f2a26;--muted:#7e8a83;--blue:#159a57;--grad:linear-gradient(135deg,#1fae5f,#0d9488);--grad-bar:linear-gradient(135deg,#15803d,#0f766e);--line:#e6efe9}
+body{font-family:'Noto Sans Thai',system-ui,sans-serif;color:var(--ink);background:#eef4f0;background-image:linear-gradient(180deg,#eef6f0,#e3efe8);background-attachment:fixed;min-height:100vh;font-size:15px}
+.mono{font-family:'IBM Plex Mono',monospace}
+.bar{background:var(--grad-bar);color:#fff;padding:18px 16px}
+.bar h1{font-size:19px;font-weight:700}.bar p{font-size:12.5px;color:#d7efe4;margin-top:3px}
+.wrap{max-width:680px;margin:0 auto;padding:18px 14px 80px}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 1px 2px rgba(20,30,60,.04);margin-bottom:14px}
+.fsec-t{font-weight:700;font-size:14.5px;margin-bottom:10px;display:flex;gap:8px;align-items:center}
+.num{width:22px;height:22px;border-radius:7px;background:#e4f5ec;color:var(--blue);font-size:12px;display:grid;place-items:center;font-weight:700}
+.fld{margin-bottom:13px}.fld:last-child{margin-bottom:0}
+label{display:block;font-size:13px;font-weight:600;color:#46504a;margin-bottom:6px}
+label .req{color:#ef4444}
+input,select,textarea{width:100%;font-family:inherit;font-size:14.5px;color:var(--ink);background:#fff;border:1px solid #dde1ea;border-radius:11px;padding:11px 13px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(21,154,87,.18)}
+textarea{resize:vertical;min-height:80px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;border-radius:12px;padding:13px;border:none}
+.btn-pri{background:var(--grad);color:#fff}.btn-sm{width:auto;padding:8px 14px;font-size:13.5px;border-radius:10px;background:#eef1f5;color:var(--ink)}
+.btn:disabled{opacity:.55}
+.muted{font-size:12.5px;color:var(--muted)}
+.ok{text-align:center;padding:40px 20px}
+.ok .ic{font-size:54px}.ok h2{font-size:20px;margin:10px 0 6px;color:#15803d}
+.ok .rid{font-family:'IBM Plex Mono',monospace;font-size:17px;font-weight:600;background:#e8f7ee;color:#15803d;display:inline-block;padding:6px 14px;border-radius:10px;margin:8px 0}
+</style>
+</head>
+<body>
+<div class="bar"><h1>ยื่นคำร้องด้านเอกสาร (DAR)</h1><p>สำหรับหน่วยงานที่ขอจัดทำ / แก้ไข / ยกเลิก / ขอใช้เอกสาร · ตาม QP-DC-01 (FM-MR-01)</p></div>
+<div class="wrap" id="wrap">
+  <form id="f">
+    <div class="card"><div class="fsec-t"><span class="num">1</span>ข้อมูลผู้ร้องขอ</div>
+      <div class="fld"><label>ชื่อ-นามสกุล ผู้ส่งคำร้อง <span class="req">*</span></label><input data-f="RequesterName" data-req="ชื่อผู้ส่งคำร้อง" placeholder="ชื่อ-นามสกุล"></div>
+      <div class="fld"><label>อีเมลผู้ขอ (สำหรับรับแจ้งผล)</label><input type="email" data-f="RequesterEmail" placeholder="name@company.com"></div>
+      <div class="fld"><label>แผนก (Department) <span class="req">*</span></label><select data-f="Department" data-req="แผนก"><option value="" disabled selected hidden>— เลือก —</option><option>QA</option><option>QC</option><option>PD</option><option>WH</option><option>HR</option><option>AC</option><option>PU</option><option>MN</option></select></div>
+    </div>
+    <div class="card"><div class="fsec-t"><span class="num">2</span>ประเภทคำขอ</div>
+      <div class="fld"><label>ประเภทการดำเนินการ <span class="req">*</span></label><select data-f="ActionType" data-req="ประเภทคำขอ"><option value="" disabled selected hidden>— เลือก —</option><option>จัดทำเอกสารใหม่</option><option>ปรับปรุง/แก้ไขเอกสาร</option><option>ยกเลิกเอกสาร</option><option>ขอสำเนา/ขอใช้เอกสาร</option></select></div>
+    </div>
+    <div class="card"><div class="fsec-t"><span class="num">3</span>ข้อมูลเอกสาร</div>
+      <div class="fld"><label>ประเภทเอกสาร <span class="req">*</span></label><select data-f="DocType" data-req="ประเภทเอกสาร"><option value="" disabled selected hidden>— เลือก —</option><option>QM</option><option>QP</option><option>WI</option><option>FM</option><option>SD</option></select></div>
+      <div class="fld"><label>ชื่อเอกสาร (ไทย/อังกฤษ) <span class="req">*</span></label><input data-f="DocName" data-req="ชื่อเอกสาร" placeholder="เช่น ขั้นตอนการตรวจรับวัตถุดิบ"></div>
+      <div class="fld"><label>รหัสเอกสาร</label><input class="mono" data-f="DocCode" placeholder="เช่น QP-QA-03 หรือกดออกเลข">
+        <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap"><button type="button" class="btn btn-sm" id="genCodeBtn">🔢 ออกเลขอัตโนมัติ</button><span class="muted" id="codeStatus"></span></div></div>
+      <div class="fld"><label>ไฟล์ฉบับร่าง (Draft File)</label><input type="url" data-f="DraftFileLink" placeholder="วางลิงก์ หรือกดอัปโหลด">
+        <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap"><button type="button" class="btn btn-sm" id="upBtn">📎 อัปโหลดไฟล์</button><input type="file" id="upFile" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" style="display:none"><span class="muted" id="upStatus"></span></div></div>
+    </div>
+    <div class="card"><div class="fsec-t"><span class="num">4</span>เหตุผลและการอนุมัติ</div>
+      <div class="fld"><label>เหตุผลในการขอ <span class="req">*</span></label><textarea data-f="Reason" data-req="เหตุผล" placeholder="ระบุเหตุผลที่ต้องสร้างหรือแก้ไขเอกสาร"></textarea></div>
+      <div class="fld"><label>วันที่คาดว่าจะแล้วเสร็จ (Target Date)</label><input type="date" data-f="ExpectedDate"></div>
+      <div class="fld"><label>ผู้อนุมัติ (Approver)</label><input data-f="ApproverName" placeholder="ชื่อผู้อนุมัติ"></div>
+    </div>
+    <button type="submit" class="btn btn-pri" id="submitBtn">✉ ส่งคำร้อง</button>
+    <p class="muted" style="text-align:center;margin-top:12px">คำร้องจะถูกส่งไปยังเจ้าหน้าที่ควบคุมเอกสาร (DCC) เพื่อพิจารณาตามขั้นตอน</p>
+  </form>
+</div>
+<script>
+function el(id){return document.getElementById(id);}
+function api(method,path,body){return fetch(path,{method:method,headers:{'content-type':'application/json'},body:body?JSON.stringify(body):undefined}).then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j&&j.error?j.error:('HTTP '+r.status));return j;});});}
+function collect(){var rec={};var els=document.querySelectorAll('[data-f]');for(var i=0;i<els.length;i++){var v=els[i].value;if(v!=='')rec[els[i].getAttribute('data-f')]=v;}return rec;}
+function missing(){var els=document.querySelectorAll('[data-req]');var m=[];for(var i=0;i<els.length;i++){if(!String(els[i].value||'').trim())m.push(els[i].getAttribute('data-req'));}return m;}
+function genCode(){var t=document.querySelector('[data-f=DocType]'),d=document.querySelector('[data-f=Department]'),st=el('codeStatus');var type=t.value,dept=d.value;if(!type||!dept){st.textContent='เลือกประเภทเอกสาร + แผนกก่อน';return;}st.textContent='กำลังออกเลข…';fetch('/api/nextcode?type='+encodeURIComponent(type)+'&dept='+encodeURIComponent(dept)).then(function(r){return r.json();}).then(function(j){if(j&&j.code){document.querySelector('[data-f=DocCode]').value=j.code;st.textContent='✓ ออกเลขให้แล้ว';}else st.textContent='ออกเลขไม่สำเร็จ';}).catch(function(){st.textContent='ออกเลขไม่สำเร็จ';});}
+function uploadFile(file){var st=el('upStatus');if(file.size>25*1024*1024){st.textContent='ไฟล์ใหญ่เกิน 25MB';return;}st.textContent='กำลังอัปโหลด… '+file.name;fetch('/api/upload?name='+encodeURIComponent(file.name),{method:'POST',headers:{'content-type':file.type||'application/octet-stream'},body:file}).then(function(r){return r.json();}).then(function(j){if(j&&j.url){document.querySelector('[data-f=DraftFileLink]').value=j.url;st.textContent='✓ แนบแล้ว: '+file.name;}else st.textContent='อัปโหลดไม่สำเร็จ';}).catch(function(){st.textContent='อัปโหลดไม่สำเร็จ';});}
+el('genCodeBtn').addEventListener('click',genCode);
+el('upBtn').addEventListener('click',function(){el('upFile').click();});
+el('upFile').addEventListener('change',function(e){var ff=e.target.files&&e.target.files[0];if(ff)uploadFile(ff);});
+el('f').addEventListener('submit',function(e){e.preventDefault();var miss=missing();if(miss.length){alert('กรุณากรอก: '+miss.join(', '));return;}var btn=el('submitBtn');btn.disabled=true;btn.textContent='กำลังส่ง…';api('POST','/api/requests',collect()).then(function(j){el('wrap').innerHTML='<div class="card ok"><div class="ic">✅</div><h2>ส่งคำร้องเรียบร้อย</h2><div class="muted">เลขที่คำร้องของคุณ</div><div class="rid">'+(j.RequestId||'-')+'</div><div class="muted">เจ้าหน้าที่ควบคุมเอกสารจะพิจารณาตามขั้นตอน QP-DC-01</div><div style="margin-top:18px"><button class="btn btn-pri" onclick="location.reload()">+ ส่งคำร้องใหม่</button></div></div>';window.scrollTo(0,0);}).catch(function(err){alert('ส่งไม่สำเร็จ: '+err.message);btn.disabled=false;btn.textContent='✉ ส่งคำร้อง';});});
 </script>
 </body>
 </html>`;
