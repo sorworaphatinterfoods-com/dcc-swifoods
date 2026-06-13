@@ -2,18 +2,16 @@ name = "dcs-document-control"
 main = "worker.js"
 compatibility_date = "2025-06-01"
 account_id = "acd0ef2518aed1f77c126d0592469ae1"
-
 # ผูก Worker เข้ากับฐานข้อมูล D1 (env.DB ในโค้ด)
 [[d1_databases]]
+
 binding = "DB"
 database_name = "dcs_document_control"
 database_id = "8ce825c6-df55-4b13-bea3-c1ae46465b48"
-
 # ที่เก็บไฟล์เอกสารที่อัปโหลด (env.FILES ในโค้ด)
 [[r2_buckets]]
 binding = "FILES"
 bucket_name = "dcs-document-files"
-
 # (ทางเลือก) ป้องกัน API ด้วย token:
 #   wrangler secret put AUTH_TOKEN
 # เมื่อตั้งค่าแล้ว ทุก request ที่ /api/* ต้องส่ง header: Authorization: Bearer <token>
