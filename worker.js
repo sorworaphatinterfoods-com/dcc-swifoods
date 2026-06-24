@@ -309,6 +309,52 @@ function darHtml(r) {
     '</body></html>';
 }
 
+// Printable control stamps (ต้นฉบับ / สำเนาควบคุม / เอกสารไม่ควบคุม) per QP-DC-01.
+function stampHtml(p) {
+  var e = function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+  var get = function (k) { return p && p.get ? (p.get(k) || '') : ''; };
+  var type = get('type') || 'all';
+  var code = get('code'), rev = get('rev'), no = get('no'), holder = get('name');
+  var CONF = {
+    original:     { th: 'ต้นฉบับ', en: 'ORIGINAL', col: '#c1121f' },
+    controlled:   { th: 'สำเนาควบคุม', en: 'CONTROLLED COPY', col: '#c1121f' },
+    uncontrolled: { th: 'เอกสารไม่ควบคุม', en: 'UNCONTROLLED COPY', col: '#8a6d00' },
+  };
+  var one = function (t) {
+    var c = CONF[t]; if (!c) return '';
+    var info = '';
+    if (code) info += '<div class="i">' + e(code) + (rev ? ' · Rev ' + e(rev) : '') + '</div>';
+    if (t === 'controlled' && no) info += '<div class="i">ชุดที่ (Copy No.) ' + e(no) + '</div>';
+    if (t === 'controlled' && holder) info += '<div class="i">ผู้ถือครอง: ' + e(holder) + '</div>';
+    return '<div class="stamp" style="color:' + c.col + ';border-color:' + c.col + '">' +
+      '<div class="th">' + c.th + '</div><div class="en">' + c.en + '</div>' +
+      '<div class="qp">QP-DC-01</div>' + info +
+      '<div class="dt">วันที่ ......./......./.......</div></div>';
+  };
+  var blocks = (type === 'all') ? (one('original') + one('controlled') + one('uncontrolled')) : one(type);
+  return '<!doctype html><html lang="th"><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1"><title>สแตมป์เอกสาร</title>' +
+    "<style>@import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@600;700;800&display=swap');" +
+    "*{box-sizing:border-box}body{font-family:'Sarabun',sans-serif;margin:0;padding:26px;background:#f4f4f4;text-align:center}" +
+    '.print{position:fixed;top:14px;right:14px;background:#15803d;color:#fff;border:none;padding:10px 18px;border-radius:8px;font:inherit;font-weight:600;cursor:pointer}' +
+    '.wrap{display:flex;flex-wrap:wrap;gap:26px;justify-content:center;align-items:flex-start}' +
+    '.stamp{display:inline-block;border:3px solid;border-radius:10px;padding:12px 22px;transform:rotate(-7deg);' +
+    'box-shadow:inset 0 0 0 2px currentColor;background:rgba(255,255,255,.7);min-width:230px}' +
+    '.stamp .th{font-size:30px;font-weight:800;line-height:1.1;letter-spacing:1px}' +
+    '.stamp .en{font-size:13px;font-weight:700;letter-spacing:2px;margin-top:2px}' +
+    '.stamp .qp{font-size:11px;font-weight:600;margin-top:6px;opacity:.85}' +
+    '.stamp .i{font-size:13px;font-weight:600;margin-top:3px}' +
+    '.stamp .dt{font-size:11.5px;font-weight:600;margin-top:8px;opacity:.9}' +
+    '.hint{color:#666;font-size:12.5px;margin:6px 0 20px}' +
+    '@media print{body{background:#fff;padding:8mm}.print,.hint{display:none}}' +
+    '</style></head><body>' +
+    '<button class="print" onclick="window.print()">🖨️ พิมพ์</button>' +
+    '<div class="hint">ตราประทับควบคุมเอกสาร · พิมพ์ลงสติกเกอร์/ฉลาก แล้วติดบนเอกสาร (สีแดงตาม QP-DC-01)</div>' +
+    '<div class="wrap">' + blocks + '</div>' +
+    '<script>window.addEventListener("load",function(){setTimeout(function(){window.print();},450);});<\/script>' +
+    '</body></html>';
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -346,6 +392,11 @@ export default {
       const r = await env.DB.prepare('SELECT * FROM approval_log WHERE id=? OR RequestId=?').bind(rid, rid).first();
       if (!r) return new Response('not found', { status: 404 });
       return new Response(darHtml(r), { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    }
+    if (url.pathname === '/stamp') {
+      const adminKey = env.ADMIN_KEY || ADMIN_KEY_DEFAULT;
+      if ((url.searchParams.get('key') || '') !== adminKey) return new Response('unauthorized', { status: 401 });
+      return new Response(stampHtml(url.searchParams), { headers: { 'content-type': 'text/html; charset=utf-8' } });
     }
     if (url.pathname === '/submit' || url.pathname === '/submit/') {
       return new Response(SUBMIT_HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
@@ -721,6 +772,7 @@ function openDistForm(rec){
     fld('ReturnedDate','วันที่เรียกคืน','date',{val:rec.ReturnedDate})+
     fld('Notes','หมายเหตุ','textarea',{val:rec.Notes})+
     '<button type="submit" class="btn btn-pri" id="saveDist" style="margin-top:6px">&#10003; บันทึก</button>'+
+    (isNew?'':'<button type="button" class="btn btn-ghost" id="stampDist" style="margin-top:10px">🔖 พิมพ์สแตมป์สำเนา</button>')+
     (isNew?'':'<button type="button" class="btn btn-ghost" id="delDist" style="margin-top:10px;color:var(--red-ink)">ลบรายการ</button>')+
   '</form>';
   openSheet(isNew?'แจกจ่ายเอกสาร':'แก้ไขบันทึกแจกจ่าย',body);
@@ -732,6 +784,10 @@ function openDistForm(rec){
     var p=isNew?api('POST','/dist',data):api('PUT','/dist/'+rec.id,data);
     p.then(function(){closeSheet();toast('บันทึกแล้ว ✓');navigate('dist');})
      .catch(function(err){toast('บันทึกไม่สำเร็จ: '+err.message);btn.disabled=false;btn.innerHTML='&#10003; บันทึก';});
+  });
+  if(!isNew)el('stampDist').addEventListener('click',function(){
+    var t=(rec.CopyType&&rec.CopyType.indexOf('Uncontrolled')>=0)?'uncontrolled':'controlled';
+    window.open('/stamp?type='+t+'&code='+encodeURIComponent(rec.DocCode||'')+'&rev='+encodeURIComponent(rec.Rev||'')+'&no='+encodeURIComponent(rec.CopyNo||'')+'&name='+encodeURIComponent(rec.HolderName||'')+'&key='+encodeURIComponent(KEY),'_blank');
   });
   if(!isNew)el('delDist').addEventListener('click',function(){
     if(!confirm('ลบรายการนี้?'))return;
@@ -919,12 +975,14 @@ function openMdlForm(rec){
     fld('Notes','หมายเหตุ','textarea',{val:rec.Notes})+
     '<button type="submit" class="btn btn-pri" id="saveMdl" style="margin-top:6px">&#10003; บันทึก</button>'+
     (isNew?'':'<button type="button" class="btn btn-ghost" id="distMdl" style="margin-top:10px">📦 แจกจ่ายเอกสารนี้</button>')+
+    (isNew?'':'<button type="button" class="btn btn-ghost" id="stampMdl" style="margin-top:10px">🔖 พิมพ์สแตมป์ “ต้นฉบับ”</button>')+
     (isNew?'':'<button type="button" class="btn btn-ghost" id="delMdl" style="margin-top:10px;color:var(--red-ink)">ลบเอกสารนี้</button>')+
    '</form>';
   openSheet(isNew?'เพิ่มเอกสารใหม่':'แก้ไขเอกสาร',body);
   el('upBtnM').addEventListener('click',function(){el('upFileM').click();});
   el('upFileM').addEventListener('change',function(e){var ff=e.target.files&&e.target.files[0];if(ff)uploadFile(ff,'FileLink','upStatusM');});
   if(!isNew)el('distMdl').addEventListener('click',function(){closeSheet();openDistForm({DocCode:rec.DocCode,DocName:rec.DocName,Rev:rec.Rev});});
+  if(!isNew)el('stampMdl').addEventListener('click',function(){window.open('/stamp?type=original&code='+encodeURIComponent(rec.DocCode||'')+'&rev='+encodeURIComponent(rec.Rev||'')+'&key='+encodeURIComponent(KEY),'_blank');});
   el('mdlForm').addEventListener('submit',function(e){
     e.preventDefault();
     var miss=requiredMissing(el('mdlForm'));if(miss){toast('กรุณากรอก: '+miss);return;}
